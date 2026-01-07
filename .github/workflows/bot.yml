@@ -1,0 +1,33 @@
+name: HR Mistral Bot Runner
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 */5 * * *' # Перезапуск каждые 5 часов (чтобы не упираться в лимиты)
+  workflow_dispatch: # Возможность ручного запуска
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Bot
+        env:
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          # Запускаем бота с таймаутом 5.5 часов, чтобы GitHub не убил его внезапно
+          timeout 19800s python bot_v3.py || echo "Bot session ended or timed out"

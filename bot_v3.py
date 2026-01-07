@@ -16,9 +16,9 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# API Ключи
-MISTRAL_API_KEY = "WOkX5dBJuq8I9sMkVqmlpNwjVrzX19i3"
-TELEGRAM_BOT_TOKEN = "8399347076:AAFLtRxXEKESWuTQb19vc6mhMQph7rHxsLg"
+# API Ключи (теперь берем из переменных окружения для безопасности)
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "WOkX5dBJuq8I9sMkVqmlpNwjVrzX19i3")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8399347076:AAFLtRxXEKESWuTQb19vc6mhMQph7rHxsLg")
 
 # Инициализация
 mistral_client = Mistral(api_key=MISTRAL_API_KEY)
@@ -94,7 +94,7 @@ async def process_ai_request(update, context, user_input, image_data=None):
         response = await mistral_client.chat.complete_async(
             model=model,
             messages=messages,
-            tools=tools if not image_data else None # Vision модели могут не поддерживать tools в некоторых версиях
+            tools=tools if not image_data else None
         )
         
         msg = response.choices[0].message
@@ -119,7 +119,6 @@ async def process_ai_request(update, context, user_input, image_data=None):
                     "tool_call_id": tool_call.id
                 })
             
-            # Повторный запрос после выполнения функции
             response = await mistral_client.chat.complete_async(
                 model="mistral-large-latest",
                 messages=messages
@@ -138,7 +137,7 @@ async def process_ai_request(update, context, user_input, image_data=None):
         await status_msg.edit_text(f"Ошибка: {str(e)[:100]}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Бот обновлен! Теперь я поддерживаю Google Календарь, PDF и фото.")
+    await update.message.reply_text("Бот запущен через GitHub Actions! Я готов помогать.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text:
@@ -156,4 +155,6 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler('start', start))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    
+    logging.info("Бот запущен...")
     application.run_polling()
