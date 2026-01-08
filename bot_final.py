@@ -75,7 +75,7 @@ async def connect_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     flow = calendar_mgr.get_flow()
     # Указываем Redirect URI явно для Web Application
-    flow.redirect_uri = 'https://oauth.pstmn.io/v1/callback'
+    flow.redirect_uri = 'https://google.com'
     auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
     
     instructions = (
@@ -143,7 +143,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('awaiting_auth_code'):
         try:
             flow = calendar_mgr.get_flow()
-            flow.redirect_uri = 'https://oauth.pstmn.io/v1/callback'
+            flow.redirect_uri = 'https://google.com'
             flow.fetch_token(code=text)
             db.save_token(user_id, json.loads(flow.credentials.to_json()))
             context.user_data['awaiting_auth_code'] = False
