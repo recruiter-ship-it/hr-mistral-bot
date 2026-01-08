@@ -39,15 +39,34 @@ SYSTEM_PROMPT = """Ты — экспертный ИИ-ассистент для 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     keyboard = [
-        [InlineKeyboardButton("📅 Подключить Google Календарь", callback_query_data='connect_calendar')],
-        [InlineKeyboardButton("📋 Мои события", callback_query_data='list_events')]
+        [InlineKeyboardButton("🔗 Подключить Календарь", callback_query_data='connect_calendar')],
+        [InlineKeyboardButton("📅 Моё расписание", callback_query_data='list_events')],
+        [InlineKeyboardButton("❓ Помощь", callback_query_data='help')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "Привет! Я твой HR-ассистент. Я могу анализировать резюме, фото и помогать с календарем.\n\n"
-        "Чтобы я мог управлять вашими встречами, нажмите кнопку ниже:",
-        reply_markup=reply_markup
+    
+    welcome_text = (
+        "👋 *Привет! Я твой персональный HR-ассистент.*\n\n"
+        "🚀 **Что я умею:**\n"
+        "• Анализировать резюме и фото (просто пришли файл)\n"
+        "• Планировать встречи в твоем календаре\n"
+        "• Напоминать о важных событиях\n\n"
+        "Чтобы начать работу с календарем, нажми кнопку ниже 👇"
     )
+    
+    if update.message:
+        await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+    else:
+        await update.callback_query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = (
+        "📖 *Как пользоваться ботом:*\n\n"
+        "1️⃣ **Календарь:** Нажми 'Подключить Календарь', перейди по ссылке и разреши доступ. Скопируй код и отправь его мне.\n"
+        "2️⃣ **Анализ:** Пришли мне PDF резюме или фото документа — я проанализирую его за секунды.\n"
+        "3️⃣ **Вопросы:** Просто пиши любой вопрос по HR, и я отвечу!"
+    )
+    await update.effective_message.reply_text(help_text, parse_mode='Markdown')
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -56,17 +75,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == 'connect_calendar':
         if not os.path.exists('credentials.json'):
-            await query.edit_message_text("Ошибка: Файл credentials.json не найден на сервере. Обратитесь к администратору.")
+            await query.edit_message_text("❌ Ошибка: Система не настроена. Пожалуйста, загрузите credentials.json.")
             return
         
         flow = calendar_mgr.get_flow()
-        auth_url, _ = flow.authorization_url(prompt='consent')
+        auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
         
-        await query.edit_message_text(
-            f"Для подключения календаря перейдите по ссылке и пришлите мне полученный код:\n\n[Авторизоваться в Google]({auth_url})",
-            parse_mode='Markdown'
+        instructions = (
+            "🔐 **Шаги для подключения:**\n\n"
+            "1. Нажми на кнопку '👉 Авторизоваться' ниже\n"
+            "2. Войди в свой Google-аккаунт\n"
+            "3. Нажми 'Разрешить'\n"
+            "4. **Скопируй полученный код** и отправь его мне в ответном сообщении."
         )
+        
+        keyboard = [[InlineKeyboardButton("👉 Авторизоваться", url=auth_url)]]
+        await query.edit_message_text(instructions, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
         context.user_data['awaiting_auth_code'] = True
+
+    elif query.data == 'help':
+        await help_command(update, context)
 
     elif query.data == 'list_events':
         token = db.get_token(user_id)
@@ -210,6 +238,7 @@ if __name__ == '__main__':
     job_queue = application.job_queue
     job_queue.run_repeating(reminder_task, interval=300, first=10) # Каждые 5 минут
     application.add_handler(CommandHandler('start', start))
+    application.add_handler(CommandHandler('help', help_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
