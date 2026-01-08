@@ -28,6 +28,7 @@ jobs:
         env:
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: |
           # Запускаем бота с таймаутом 5.5 часов, чтобы GitHub не убил его внезапно
           timeout 19800s python bot_v3.py || echo "Bot session ended or timed out"

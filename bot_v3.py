@@ -18,6 +18,12 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 # Конфигурация
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "WOkX5dBJuq8I9sMkVqmlpNwjVrzX19i3")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8399347076:AAFLtRxXEKESWuTQb19vc6mhMQph7rHxsLg")
+GOOGLE_CREDENTIALS = os.getenv("GOOGLE_CREDENTIALS")
+
+if GOOGLE_CREDENTIALS and not os.path.exists("credentials.json"):
+    with open("credentials.json", "w") as f:
+        f.write(GOOGLE_CREDENTIALS)
+    logging.info("credentials.json restored")
 
 # Инициализация
 mistral_client = Mistral(api_key=MISTRAL_API_KEY)
