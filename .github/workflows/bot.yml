@@ -4,8 +4,8 @@ on:
   push:
     branches: [ main ]
   schedule:
-    - cron: '0 */5 * * *' # Перезапуск каждые 5 часов (чтобы не упираться в лимиты)
-  workflow_dispatch: # Возможность ручного запуска
+    - cron: '0 */5 * * *'
+  workflow_dispatch:
 
 jobs:
   run-bot:
@@ -30,5 +30,5 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: |
-          # Запускаем бота с таймаутом 5.5 часов, чтобы GitHub не убил его внезапно
-          timeout 19800s python bot_v3.py || echo "Bot session ended or timed out"
+          # Запускаем новый файл bot_final.py
+          timeout 19800s python bot_final.py || echo "Bot session ended"
