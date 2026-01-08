@@ -161,9 +161,16 @@ async def process_ai_request(update, context, user_input, image_data=None):
         history.append({"role": "user", "content": user_input})
         history.append({"role": "assistant", "content": full_response})
         user_memory[chat_id] = history
-        await update.message.reply_text(full_response, parse_mode='Markdown' if "```" in full_response else None)
+        await send_long_message(update, full_response, parse_mode='Markdown' if "```" in full_response else None)
     except Exception as e:
         await update.message.reply_text(f"Ошибка: {str(e)[:100]}")
+
+async def send_long_message(update, text, parse_mode=None):
+    if len(text) <= 4096:
+        await update.message.reply_text(text, parse_mode=parse_mode)
+    else:
+        for i in range(0, len(text), 4096):
+            await update.message.reply_text(text[i:i+4096], parse_mode=parse_mode)
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1]
