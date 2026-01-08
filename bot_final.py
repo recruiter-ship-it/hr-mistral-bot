@@ -58,12 +58,44 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
-        "📖 *Как пользоваться ботом:*\n\n"
-        "1️⃣ **Календарь:** Нажми 'Подключить Календарь', перейди по ссылке и разреши доступ. Скопируй код и отправь его мне.\n"
-        "2️⃣ **Анализ:** Пришли мне PDF резюме или фото документа — я проанализирую его за секунды.\n"
-        "3️⃣ **Вопросы:** Просто пиши любой вопрос по HR, и я отвечу!"
+        "📖 *Доступные команды:*\n\n"
+        "🔗 /connect — Подключить Google Календарь\n"
+        "📅 /events — Посмотреть мои ближайшие события\n"
+        "❓ /help — Показать это сообщение\n\n"
+        "💡 *Также ты можешь:*\n"
+        "• Прислать PDF резюме или фото для анализа\n"
+        "• Просто писать вопросы по HR и рекрутингу"
     )
     await update.effective_message.reply_text(help_text, parse_mode='Markdown')
+
+async def connect_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not os.path.exists('credentials.json'):
+        await update.message.reply_text("❌ Ошибка: Система не настроена. Пожалуйста, загрузите credentials.json.")
+        return
+    
+    flow = calendar_mgr.get_flow()
+    auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
+    
+    instructions = (
+        "🔐 **Подключение календаря:**\n\n"
+        f"1. Перейдите по ссылке: [Авторизоваться в Google]({auth_url})\n"
+        "2. Войдите в аккаунт и нажмите 'Разрешить'\n"
+        "3. **Скопируй полученный код** и отправь его мне сюда."
+    )
+    await update.message.reply_text(instructions, parse_mode='Markdown')
+    context.user_data['awaiting_auth_code'] = True
+
+async def events_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    token = db.get_token(user_id)
+    if not token:
+        await update.message.reply_text("❌ Сначала подключите календарь через /connect")
+        return
+    
+    res, updated_token = calendar_mgr.list_events(token)
+    if updated_token:
+        db.save_token(user_id, updated_token)
+    await send_long_message(update, res)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -200,6 +232,8 @@ if __name__ == '__main__':
     application.job_queue.run_repeating(reminder_task, interval=300, first=10)
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('help', help_command))
+    application.add_handler(CommandHandler('connect', connect_command))
+    application.add_handler(CommandHandler('events', events_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
