@@ -61,7 +61,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🚀 Отвечать на любые вопросы по рекрутингу\n\n"
         "Чтобы я мог видеть твой календарь, нажми кнопку ниже!"
     )
-    await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
+    await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode=None)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
@@ -75,7 +75,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Попроси назначить встречу (например: 'Назначь интервью на завтра в 12:00')\n"
         "• Просто пиши вопросы по HR"
     )
-    await update.effective_message.reply_text(help_text, parse_mode='Markdown')
+    await update.effective_message.reply_text(help_text, parse_mode=None)
 
 async def connect_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     service_email = "hr-bot-640@hr-bot-483711.iam.gserviceaccount.com"
@@ -91,7 +91,7 @@ async def connect_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "8. Нажмите 'Отправить'.\n\n"
         "9. Финальный шаг: Пришлите мне ваш Gmail адрес (например: example@gmail.com), чтобы я знал, какой календарь проверять."
     )
-    await update.message.reply_text(instructions, parse_mode='Markdown')
+    await update.message.reply_text(instructions, parse_mode=None)
     context.user_data['awaiting_gmail'] = True
 
 async def events_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -141,13 +141,27 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_path = f"temp_{update.message.document.file_name}"
     await file.download_to_drive(file_path)
     
+    caption = update.message.caption if update.message.caption else ""
+    
     if file_path.endswith('.pdf'):
         doc = fitz.open(file_path)
-        text = "".join([page.get_text() for page in doc])
-        prompt = f"Проанализируй это резюме и дай краткую оценку:\n\n{text}"
+        pdf_text = "".join([page.get_text() for page in doc])
+        
+        system_prompt = "Ты профессиональный HR-ассистент. НЕ используй Markdown разметку (звездочки, жирный шрифт). Используй только обычный текст и эмодзи."
+        user_prompt = f"Проанализируй это резюме. "
+        if caption:
+            user_prompt += f"Учти следующий комментарий/вопрос пользователя: {caption}\n\n"
+        else:
+            user_prompt += "Дай краткую оценку:\n\n"
+        
+        user_prompt += f"Текст резюме:\n{pdf_text}"
+        
         response = mistral_client.chat.complete(
             model="mistral-large-latest",
-            messages=[{"role": "user", "content": prompt}]
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
         )
         await send_long_message(update, response.choices[0].message.content)
     
