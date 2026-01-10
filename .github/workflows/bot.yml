@@ -30,5 +30,5 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: |
-          # Запускаем новый файл bot_final.py
-          timeout 19800s python bot_final.py || echo "Bot session ended"
+          # Запускаем новый файл bot.py
+          timeout 19800s python bot.py || echo "Bot session ended"
