@@ -4,7 +4,12 @@ import asyncio
 import logging
 import base64
 import sqlite3
-import requests
+try:
+    import requests
+except ImportError:
+    import os
+    os.system("pip install requests")
+    import requests
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
