@@ -33,8 +33,17 @@ GOOGLE_CREDENTIALS_BASE64 = os.getenv("GOOGLE_CREDENTIALS")
 
 # Восстановление credentials.json из секрета
 if GOOGLE_CREDENTIALS_BASE64:
-    with open("credentials.json", "wb") as f:
-        f.write(base64.b64decode(GOOGLE_CREDENTIALS_BASE64))
+    try:
+        # Исправление паддинга base64 если необходимо
+        missing_padding = len(GOOGLE_CREDENTIALS_BASE64) % 4
+        if missing_padding:
+            GOOGLE_CREDENTIALS_BASE64 += '=' * (4 - missing_padding)
+        
+        with open("credentials.json", "wb") as f:
+            f.write(base64.b64decode(GOOGLE_CREDENTIALS_BASE64))
+        logging.info("credentials.json successfully restored")
+    except Exception as e:
+        logging.error(f"Error restoring credentials.json: {e}")
 
 # Инициализация клиентов
 mistral_client = Mistral(api_key=MISTRAL_API_KEY)
