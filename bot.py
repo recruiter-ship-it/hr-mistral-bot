@@ -4,6 +4,7 @@ import asyncio
 import logging
 import base64
 import sqlite3
+import requests
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
@@ -22,6 +23,7 @@ logging.basicConfig(
 # Инициализация API ключей
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
+SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 GOOGLE_CREDENTIALS_BASE64 = os.getenv("GOOGLE_CREDENTIALS")
 
 # Восстановление credentials.json из секрета
@@ -39,6 +41,28 @@ async def send_long_message(update, text):
         return
     for i in range(0, len(text), 4096):
         await update.message.reply_text(text[i:i+4096])
+
+def search_internet(query):
+    """Поиск информации в интернете через Serper API."""
+    if not SERPER_API_KEY:
+        return "Ошибка: API ключ для поиска не настроен."
+    
+    url = "https://google.serper.dev/search"
+    payload = json.dumps({"q": query, "gl": "ru", "hl": "ru"})
+    headers = {
+        'X-API-KEY': SERPER_API_KEY,
+        'Content-Type': 'application/json'
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, data=payload)
+        results = response.json()
+        search_text = "Результаты поиска:\n"
+        for result in results.get('organic', [])[:3]:
+            search_text += f"- {result.get('title')}: {result.get('snippet')}\n"
+        return search_text
+    except Exception as e:
+        return f"Ошибка при поиске: {str(e)}"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -125,11 +149,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Обычный чат с Mistral
     try:
+        # Простая логика: если в запросе есть слова про поиск или новости, используем Serper
+        search_keywords = ['найди', 'поиск', 'новости', 'интернет', 'узнай', 'кто такой', 'что такое']
+        context_text = ""
+        if any(word in text.lower() for word in search_keywords):
+            await update.message.reply_text("🔍 Ищу информацию в интернете...")
+            context_text = search_internet(text)
+
+        system_prompt = "Ты профессиональный HR-ассистент. Отвечай четко и по делу. НЕ используй Markdown разметку (звездочки, жирный шрифт). Используй только обычный текст и эмодзи."
+        user_content = text
+        if context_text:
+            user_content = f"Используй эти данные из интернета для ответа:\n{context_text}\n\nВопрос пользователя: {text}"
+
         response = mistral_client.chat.complete(
-            model="mistral-large-latest",
+            model="mistral-small-latest",
             messages=[
-                {"role": "system", "content": "Ты профессиональный HR-ассистент. Отвечай четко и по делу. НЕ используй Markdown разметку (жирный шрифт, звездочки и т.д.) в своих ответах. Используй только обычный текст и эмодзи для оформления."},
-                {"role": "user", "content": text}
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
             ]
         )
         await send_long_message(update, response.choices[0].message.content)
@@ -157,7 +193,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_prompt += f"Текст резюме:\n{pdf_text}"
         
         response = mistral_client.chat.complete(
-            model="mistral-large-latest",
+            model="mistral-small-latest",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
