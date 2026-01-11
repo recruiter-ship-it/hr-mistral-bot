@@ -147,19 +147,29 @@ async def events_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     res, _ = calendar_mgr.list_events(gmail)
     await update.message.reply_text(res)
 
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отменяет текущее действие."""
+    context.user_data['awaiting_gmail'] = False
+    await update.message.reply_text("❌ Действие отменено. Теперь вы можете просто общаться со мной.")
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
-
+    
     # Если ждем Gmail для подключения
     if context.user_data.get('awaiting_gmail'):
-        if "@" in text:
+        if "@" in text.lower():
             db.save_token(user_id, text) # Сохраняем Gmail адрес
             context.user_data['awaiting_gmail'] = False
-            await update.message.reply_text(f"✅ Календарь `{text}` успешно привязан! Теперь я могу видеть ваши встречи.")
+            await update.message.reply_text(f"✅ Календарь {text} успешно привязан! Теперь я могу видеть ваши встречи.")
+            return
+        # Если это не почта, но мы ждали почту - даем возможность просто общаться
+        elif text.startswith('/'):
+            context.user_data['awaiting_gmail'] = False
         else:
-            await update.message.reply_text("❌ Пожалуйста, введите корректный Gmail адрес.")
-        return
+            # Если пользователь просто что-то пишет, не похожее на почту, 
+            # мы сбрасываем ожидание и отвечаем как ИИ, чтобы не блокировать чат
+            context.user_data['awaiting_gmail'] = False
 
     # Обычный чат с Mistral
     try:
@@ -236,6 +246,7 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("connect", connect_command))
     app.add_handler(CommandHandler("events", events_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(CallbackQueryHandler(button_handler))
