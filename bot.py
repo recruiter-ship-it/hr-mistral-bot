@@ -2,7 +2,7 @@
 Telegram bot entrypoint for the HR Mistral assistant.
 
 This module wires together all of the bot's capabilities: PDF and image
-analysis, Google Calendar integration, internet search via Serper, and
+analysis, Google Calendar integration, internet search via Mistral Web Search, and
 interaction with the Mistral AI chat API. It also persists conversation
 history to a SQLite database to provide context-aware responses across
 multiple interactions with the same user.
@@ -10,7 +10,7 @@ multiple interactions with the same user.
 The bot responds to simple commands (/start, /connect, /events, /help,
 /cancel) and free-form HR questions. When the user asks something that
 requires external information (for example, "найди" or "что такое"), the bot
-performs a web search via Serper and incorporates the results into its
+performs a web search via the integrated Mistral Web Search tool and incorporates the results into its
 response.
 """
 
@@ -98,33 +98,44 @@ async def send_long_message(update: Update, text: str) -> None:
 
 def search_internet(query: str) -> str:
     """
-    Perform an internet search via the Serper API.
+    Perform an internet search using the Mistral Web Search tool.
 
-    The function returns a short summary of the top three search results. If no
-    API key is configured or an error occurs, a human-readable error message
-    is returned instead.
+    This function contacts Mistral's built-in ``web_search`` tool to obtain
+    up-to-date information for the given query. If the ``MISTRAL_API_KEY``
+    environment variable is not set or an exception is raised during the
+    request, a human-readable error message is returned instead.
 
     :param query: The search query.
-    :return: A formatted string summarizing search results or an error message.
+    :return: A formatted string with search results or an error message.
     """
-    if not SERPER_API_KEY:
-        return "Ошибка: API ключ для поиска не настроен."
+    # If the Mistral API key is not configured, we cannot perform a search.
+    if not MISTRAL_API_KEY:
+        return "Поиск недоступен: не задан API‑ключ Mistral"
 
-    url = "https://google.serper.dev/search"
-    payload = json.dumps({"q": query, "gl": "ru", "hl": "ru"})
-    headers = {
-        'X-API-KEY': SERPER_API_KEY,
-        'Content-Type': 'application/json',
-    }
     try:
-        response = requests.post(url, headers=headers, data=payload)
-        results = response.json()
-        search_text = "Результаты поиска:\n"
-        for result in results.get('organic', [])[:3]:
-            search_text += f"- {result.get('title')}: {result.get('snippet')}\n"
-        return search_text
+        # Importing Mistral client here avoids unnecessary dependency loading
+        from mistralai.client import MistralClient
+        from mistralai.models.chat_completion import ChatMessage
+
+        # Initialize the client with the API key
+        client = MistralClient(api_key=MISTRAL_API_KEY)
+
+        # Prepare the messages and tools payload. The ``web_search`` tool is
+        # enabled via the tools parameter so the model can fetch fresh
+        # information. The query itself is provided in Russian because the
+        # bot's primary language is Russian.
+        messages = [
+            ChatMessage(role="user", content=f"Найди в интернете: {query}")
+        ]
+        tools = [{"type": "web_search"}]
+
+        # Perform the chat completion with the web_search tool enabled. The
+        # content of the first choice is returned directly as plain text.
+        response = client.chat(messages=messages, tools=tools)
+        return response.choices[0].message.content
     except Exception as e:
-        return f"Ошибка при поиске: {str(e)}"
+        # Return an error message if the search fails for any reason.
+        return f"Ошибка при поиске: {e}"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -165,7 +176,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/help - Список всех команд\n\n"
         "Возможности:\n"
         "• Пришли мне PDF или фото резюме для анализа\n"
-        "• Попроси назначить встречу (например: 'Назначь интервью на завтра в 12:00')\n"
+        "• Попроси назначить встречу (\u043dапример: 'Назначь интервью на завтра в 12:00')\n"
         "• Просто пиши вопросы по HR"
     )
     await update.effective_message.reply_text(help_text, parse_mode=None)
