@@ -1,37 +1,41 @@
 import sqlite3
 import json
 
-class Database:
-    def __init__(self, db_path="bot_data.db"):
-        self.db_path = db_path
-        self.init_db()
+DB_PATH = "bot_data.db"
 
-    def init_db(self):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    user_id INTEGER PRIMARY KEY,
-                    google_token TEXT,
-                    timezone TEXT DEFAULT 'UTC'
-                )
-            """)
-            conn.commit()
-
-    def save_token(self, user_id, token_data):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO users (user_id, google_token) VALUES (?, ?)",
-                (user_id, json.dumps(token_data))
+def init_db():
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                google_token TEXT,
+                timezone TEXT DEFAULT 'UTC'
             )
-            conn.commit()
+        """)
+        conn.commit()
 
-    def get_token(self, user_id):
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("SELECT google_token FROM users WHERE user_id = ?", (user_id,))
-            row = cursor.fetchone()
-            return json.loads(row[0]) if row and row[0] else None
+def save_token(user_id, token_data):
+    with sqlite3.connect(DB_PATH) as conn:
+        # Если token_data это строка (Gmail), сохраняем как есть, если нет - в JSON
+        val = token_data if isinstance(token_data, str) else json.dumps(token_data)
+        conn.execute(
+            "INSERT OR REPLACE INTO users (user_id, google_token) VALUES (?, ?)",
+            (user_id, val)
+        )
+        conn.commit()
 
-    def delete_token(self, user_id):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("UPDATE users SET google_token = NULL WHERE user_id = ?", (user_id,))
-            conn.commit()
+def get_token(user_id):
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute("SELECT google_token FROM users WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        if not row or not row[0]:
+            return None
+        try:
+            return json.loads(row[0])
+        except:
+            return row[0]
+
+def delete_token(user_id):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("UPDATE users SET google_token = NULL WHERE user_id = ?", (user_id,))
+        conn.commit()
