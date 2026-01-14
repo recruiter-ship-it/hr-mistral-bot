@@ -42,7 +42,6 @@ from mistralai import Mistral
 import fitz  # PyMuPDF
 from google_calendar import GoogleCalendarManager
 import database as db
-from database import add_conversation, get_conversation
 
 
 # Configure logging to both file and stdout
@@ -113,25 +112,19 @@ def search_internet(query: str) -> str:
         return "Поиск недоступен: не задан API‑ключ Mistral"
 
     try:
-        # Importing Mistral client here avoids unnecessary dependency loading
-        from mistralai.client import MistralClient
-        from mistralai.models.chat_completion import ChatMessage
-
-        # Initialize the client with the API key
-        client = MistralClient(api_key=MISTRAL_API_KEY)
-
         # Prepare the messages and tools payload. The ``web_search`` tool is
         # enabled via the tools parameter so the model can fetch fresh
-        # information. The query itself is provided in Russian because the
-        # bot's primary language is Russian.
+        # information.
         messages = [
-            ChatMessage(role="user", content=f"Найди в интернете: {query}")
+            {"role": "user", "content": f"Найди в интернете: {query}"}
         ]
-        tools = [{"type": "web_search"}]
-
-        # Perform the chat completion with the web_search tool enabled. The
-        # content of the first choice is returned directly as plain text.
-        response = client.chat(messages=messages, tools=tools)
+        
+        # Perform the chat completion with the web_search tool enabled.
+        response = mistral_client.chat.complete(
+            model="mistral-small-latest",
+            messages=messages,
+            tools=[{"type": "web_search"}]
+        )
         return response.choices[0].message.content
     except Exception as e:
         # Return an error message if the search fails for any reason.
@@ -176,7 +169,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/help - Список всех команд\n\n"
         "Возможности:\n"
         "• Пришли мне PDF или фото резюме для анализа\n"
-        "• Попроси назначить встречу (\u043dапример: 'Назначь интервью на завтра в 12:00')\n"
+        "• Попроси назначить встречу (например: 'Назначь интервью на завтра в 12:00')\n"
         "• Просто пиши вопросы по HR"
     )
     await update.effective_message.reply_text(help_text, parse_mode=None)
@@ -253,7 +246,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 f"✅ Календарь {text} успешно привязан! Теперь я могу видеть ваши встречи."
             )
             # Record the user's email message in conversation history
-            add_conversation(user_id, "user", text)
+            db.save_message(user_id, "user", text)
             return
         elif text.startswith('/'):
             # If a command is entered instead of an email, exit the awaiting
@@ -267,7 +260,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Normal chat with Mistral
     try:
-        # Simple heuristic: if the query contains certain keywords, perform a web search
         search_keywords = [
             'найди', 'поиск', 'новости', 'интернет', 'узнай', 'кто такой', 'что такое'
         ]
@@ -277,7 +269,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context_text = search_internet(text)
 
         # Retrieve recent conversation history for context (prior messages only)
-        history = get_conversation(user_id, limit=10)
+        history = db.get_history(user_id, limit=10)
 
         # System prompt provides high-level instructions. This is always the first
         # message in the conversation.
@@ -288,8 +280,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         messages_list = [{"role": "system", "content": system_prompt}]
         for entry in history:
-            if entry["role"] in ["user", "assistant"]:
-                messages_list.append({"role": entry["role"], "content": entry["content"]})
+            messages_list.append({"role": entry["role"], "content": entry["content"]})
 
         # Prepare the user message, optionally enriched with search results
         if context_text:
@@ -301,10 +292,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             user_content = text
         messages_list.append({"role": "user", "content": user_content})
 
-        # Record the user's message after constructing the prompt (so the current
-        # message is not included twice in the history we retrieved above)
-        add_conversation(user_id, "user", text)
-
         # Generate a response using the Mistral chat API
         response = mistral_client.chat.complete(
             model="mistral-small-latest",
@@ -312,8 +299,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         ai_content = response.choices[0].message.content
 
-        # Persist the assistant's reply for future context
-        add_conversation(user_id, "assistant", ai_content)
+        # Persist both messages for future context
+        db.save_message(user_id, "user", text)
+        db.save_message(user_id, "assistant", ai_content)
 
         await send_long_message(update, ai_content)
     except Exception as e:
@@ -358,8 +346,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         # Record the interaction in the conversation history
         user_id = update.effective_user.id
-        add_conversation(user_id, "user", caption or "(файл PDF отправлен)")
-        add_conversation(user_id, "assistant", ai_content)
+        db.save_message(user_id, "user", f"[Загружен PDF: {update.message.document.file_name}] {caption}")
+        db.save_message(user_id, "assistant", ai_content)
 
     # Remove the temporary file
     os.remove(file_path)
