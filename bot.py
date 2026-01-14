@@ -292,26 +292,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             user_content = text
         messages_list.append({"role": "user", "content": user_content})
 
-        # Generate a response using the Mistral chat API with retry logic
-        max_retries = 2
-        ai_content = None
-        for attempt in range(max_retries):
-            try:
-                response = mistral_client.chat.complete(
-                    model="mistral-small-latest",
-                    messages=messages_list,
-                )
-                ai_content = response.choices[0].message.content
-                break
-            except Exception as retry_error:
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(2)  # Wait 2 seconds before retry
-                    continue
-                else:
-                    raise retry_error
-        
-        if not ai_content:
-            raise Exception("Не удалось получить ответ от ИИ после нескольких попыток")
+        # Generate a response using the Mistral chat API
+        response = mistral_client.chat.complete(
+            model="mistral-small-latest",
+            messages=messages_list,
+        )
+        ai_content = response.choices[0].message.content
 
         # Persist both messages for future context
         db.save_message(user_id, "user", text)
