@@ -76,8 +76,8 @@ if GOOGLE_CREDENTIALS_BASE64:
         logging.error(f"Error restoring credentials.json: {e}")
 
 
-# Initialize external clients
-mistral_client = Mistral(api_key=MISTRAL_API_KEY)
+# Initialize external clients with timeout
+mistral_client = Mistral(api_key=MISTRAL_API_KEY, timeout=30)
 calendar_mgr = GoogleCalendarManager()
 
 
@@ -268,8 +268,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text("🔍 Ищу информацию в интернете...")
             context_text = search_internet(text)
 
-        # Retrieve recent conversation history for context (prior messages only)
-        history = db.get_history(user_id, limit=10)
+        # Retrieve recent conversation history for context (limited to 5 for faster processing)
+        history = db.get_history(user_id, limit=5)
 
         # System prompt provides high-level instructions. This is always the first
         # message in the conversation.
@@ -292,12 +292,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             user_content = text
         messages_list.append({"role": "user", "content": user_content})
 
-        # Generate a response using the Mistral chat API
-        response = mistral_client.chat.complete(
-            model="mistral-small-latest",
-            messages=messages_list,
-        )
-        ai_content = response.choices[0].message.content
+        # Generate a response using the Mistral chat API with retry logic
+        max_retries = 2
+        ai_content = None
+        for attempt in range(max_retries):
+            try:
+                response = mistral_client.chat.complete(
+                    model="mistral-small-latest",
+                    messages=messages_list,
+                )
+                ai_content = response.choices[0].message.content
+                break
+            except Exception as retry_error:
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2)  # Wait 2 seconds before retry
+                    continue
+                else:
+                    raise retry_error
+        
+        if not ai_content:
+            raise Exception("Не удалось получить ответ от ИИ после нескольких попыток")
 
         # Persist both messages for future context
         db.save_message(user_id, "user", text)
