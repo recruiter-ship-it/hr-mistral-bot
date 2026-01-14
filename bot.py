@@ -276,7 +276,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         system_prompt = (
             "Ты профессиональный HR-ассистент. Отвечай чётко и по делу. "
             "НЕ используй Markdown разметку (звёздочки, жирный шрифт). "
-            "Используй только обычный текст и эмодзи."
+            "Используй только обычный текст и эмодзи. "
+            "ВАЖНО: Отвечай ТОЛЬКО на последний вопрос пользователя. "
+            "Не пытайся отвечать на старые вопросы из истории диалога."
         )
         messages_list = [{"role": "system", "content": system_prompt}]
         for entry in history:
