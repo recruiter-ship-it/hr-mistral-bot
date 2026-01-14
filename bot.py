@@ -270,8 +270,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "НЕ используй Markdown разметку (звёздочки, жирный шрифт). "
             "Используй только обычный текст и эмодзи. "
             "ВАЖНО: Отвечай ТОЛЬКО на последний вопрос пользователя. "
-            "Не пытайся отвечать на старые вопросы из истории диалога. "
-            "Если тебе нужна актуальная информация из интернета, используй встроенный веб-поиск."
+            "Не пытайся отвечать на старые вопросы из истории диалога."
         )
         messages_list = [{"role": "system", "content": system_prompt}]
         for entry in history:
@@ -280,11 +279,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Add the current user message
         messages_list.append({"role": "user", "content": text})
 
-        # Generate a response using the Mistral chat API with web search enabled
+        # Generate a response using the Mistral chat API
         response = mistral_client.chat.complete(
             model="mistral-small-latest",
-            messages=messages_list,
-            tools=[{"type": "web_search"}]
+            messages=messages_list
         )
         ai_content = response.choices[0].message.content
 
