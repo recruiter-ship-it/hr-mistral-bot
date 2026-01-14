@@ -10,7 +10,6 @@ from mistralai import Mistral
 import database as db
 import google_auth
 from google_calendar_manager import GoogleCalendarManager
-from gmail_manager import GmailManager
 
 # Настройка логирования
 logging.basicConfig(
@@ -45,10 +44,10 @@ AGENT_INSTRUCTIONS = """
 - Анализ: Если тебе загружают транскрипт или заметки с интервью, структурируй их. Оценивай ответы кандидата на предмет soft и hard skills. Ищи несостыковки.
 - Scorecards: Помогай заполнять карты оценки кандидатов.
 
-4. РАБОТА С КАЛЕНДАРЕМ И ПОЧТОЙ:
+4. РАБОТА С КАЛЕНДАРЕМ:
 - Ты можешь просматривать календарь пользователя и помогать планировать интервью.
-- Ты можешь читать письма из Gmail и делать их анализ.
-- Когда пользователь просит посмотреть календарь или почту, используй соответствующие функции.
+- Когда пользователь просит посмотреть календарь, используй функцию get_calendar_events.
+- Ты можешь помочь найти свободное время для встреч.
 
 ФОРМАТ ОБЩЕНИЯ И СТИЛЬ:
 - Тон: Профессиональный, объективный, но эмпатичный.
@@ -67,7 +66,6 @@ mistral_client = Mistral(api_key=MISTRAL_API_KEY)
 # Глобальные переменные
 hr_agent = None
 calendar_manager = GoogleCalendarManager()
-gmail_manager = GmailManager()
 
 # Хранилище conversation_id для каждого пользователя
 user_conversations = {}
@@ -98,22 +96,6 @@ def initialize_agent():
                             }
                         }
                     }
-                },
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "get_recent_emails",
-                        "description": "Get recent emails from user's Gmail inbox",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "max_results": {
-                                    "type": "integer",
-                                    "description": "Maximum number of emails to retrieve (default: 10)"
-                                }
-                            }
-                        }
-                    }
                 }
             ],
             completion_args={
@@ -124,11 +106,6 @@ def initialize_agent():
     except Exception as e:
         logging.error(f"Failed to create agent: {e}")
         raise
-
-def encode_image(image_path):
-    """Encode image to base64 string."""
-    with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode('utf-8')
 
 def remove_markdown(text):
     """Удаление Markdown форматирования из текста"""
@@ -148,32 +125,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del user_conversations[chat_id]
     
     await update.message.reply_text(
-        "Привет! Я твой экспертный ИИ-ассистент для HR с автоматическим веб-поиском.\n\n"
+        "👋 Привет! Я твой экспертный ИИ-ассистент для HR с автоматическим веб-поиском.\n\n"
         "Я могу:\n"
-        "- Анализировать резюме (PDF)\n"
-        "- Искать актуальную информацию в интернете\n"
-        "- Помогать с рекрутингом и HR-стратегиями\n"
-        "- Работать с твоим Google Calendar и Gmail (после подключения)\n\n"
-        "Команды:\n"
-        "/connect - подключить Google аккаунт\n"
-        "/calendar - показать события календаря\n"
-        "/emails - показать последние письма\n"
-        "/disconnect - отключить Google аккаунт\n\n"
-        "Пришли мне файл, фото или задай вопрос!"
+        "✅ Анализировать резюме (PDF)\n"
+        "✅ Искать актуальную информацию в интернете\n"
+        "✅ Помогать с рекрутингом и HR-стратегиями\n"
+        "✅ Работать с твоим Google Calendar\n\n"
+        "📅 Команды для календаря:\n"
+        "/connect - подключить Google Calendar\n"
+        "/calendar - показать события\n"
+        "/disconnect - отключить календарь\n\n"
+        "Пришли мне PDF резюме или задай вопрос!"
     )
 
 async def connect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда для подключения Google аккаунта"""
+    """Команда для подключения Google Calendar"""
     user_id = update.effective_user.id
     
-    # Проверяем, уже подключен ли аккаунт
+    # Проверяем, уже подключен ли календарь
     credentials = google_auth.get_credentials(user_id)
     if credentials:
         await update.message.reply_text(
-            "✅ Ваш Google аккаунт уже подключен!\n\n"
+            "✅ Ваш Google Calendar уже подключен!\n\n"
             "Используйте:\n"
-            "/calendar - для просмотра календаря\n"
-            "/emails - для просмотра писем\n"
+            "/calendar - для просмотра событий\n"
             "/disconnect - для отключения"
         )
         return
@@ -182,46 +157,18 @@ async def connect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
     auth_url = google_auth.get_auth_url(user_id)
     
     await update.message.reply_text(
-        "🔐 Для подключения Google Calendar и Gmail:\n\n"
-        "1. Перейдите по ссылке ниже\n"
-        "2. Войдите в свой Google аккаунт\n"
-        "3. Разрешите доступ к календарю и почте\n"
-        "4. Скопируйте код авторизации\n"
-        "5. Отправьте мне код командой: /auth <код>\n\n"
-        f"🔗 Ссылка для авторизации:\n{auth_url}\n\n"
-        "⚠️ Внимание: Код действителен 10 минут!"
+        "📅 Подключение Google Calendar\n\n"
+        "Шаг 1: Перейдите по ссылке ниже\n"
+        "Шаг 2: Войдите в Google аккаунт\n"
+        "Шаг 3: Нажмите 'Разрешить'\n"
+        "Шаг 4: Скопируйте код\n"
+        "Шаг 5: Отправьте мне код\n\n"
+        f"🔗 Ссылка:\n{auth_url}\n\n"
+        "После получения кода просто отправьте его мне в чат (без команд)."
     )
-
-async def auth_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка кода авторизации"""
-    user_id = update.effective_user.id
     
-    if not context.args:
-        await update.message.reply_text(
-            "❌ Пожалуйста, укажите код авторизации:\n"
-            "/auth <код>"
-        )
-        return
-    
-    auth_code = context.args[0]
-    
-    await update.message.reply_text("⏳ Сохраняю авторизацию...")
-    
-    success = google_auth.save_credentials_from_code(user_id, auth_code)
-    
-    if success:
-        await update.message.reply_text(
-            "✅ Google аккаунт успешно подключен!\n\n"
-            "Теперь вы можете использовать:\n"
-            "/calendar - просмотр календаря\n"
-            "/emails - просмотр писем\n\n"
-            "Или просто спросите меня: 'Какие у меня встречи сегодня?' или 'Покажи последние письма'"
-        )
-    else:
-        await update.message.reply_text(
-            "❌ Ошибка при сохранении авторизации.\n"
-            "Попробуйте еще раз: /connect"
-        )
+    # Сохраняем состояние "ожидает код"
+    context.user_data['waiting_for_auth_code'] = True
 
 async def show_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать события календаря"""
@@ -231,7 +178,7 @@ async def show_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     credentials = google_auth.get_credentials(user_id)
     if not credentials:
         await update.message.reply_text(
-            "❌ Google аккаунт не подключен.\n"
+            "❌ Google Calendar не подключен.\n"
             "Используйте /connect для подключения."
         )
         return
@@ -246,41 +193,14 @@ async def show_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message, events = calendar_manager.list_events(user_id, days=days)
     await update.message.reply_text(message)
 
-async def show_emails(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показать последние письма"""
-    user_id = update.effective_user.id
-    
-    # Проверяем авторизацию
-    credentials = google_auth.get_credentials(user_id)
-    if not credentials:
-        await update.message.reply_text(
-            "❌ Google аккаунт не подключен.\n"
-            "Используйте /connect для подключения."
-        )
-        return
-    
-    # Определяем количество писем
-    max_results = 10
-    if context.args and context.args[0].isdigit():
-        max_results = int(context.args[0])
-    
-    await update.message.reply_text("⏳ Загружаю письма...")
-    
-    message, emails = gmail_manager.get_recent_emails(user_id, max_results=max_results)
-    
-    # Убираем Markdown
-    message = remove_markdown(message)
-    
-    await update.message.reply_text(message)
-
 async def disconnect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отключить Google аккаунт"""
+    """Отключить Google Calendar"""
     user_id = update.effective_user.id
     
     google_auth.revoke_credentials(user_id)
     
     await update.message.reply_text(
-        "✅ Google аккаунт отключен.\n"
+        "✅ Google Calendar отключен.\n"
         "Используйте /connect для повторного подключения."
     )
 
@@ -346,8 +266,37 @@ async def process_ai_request(update, context, user_input, is_file=False):
         )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text:
-        await process_ai_request(update, context, update.message.text)
+    user_id = update.effective_user.id
+    text = update.message.text
+    
+    # Проверяем, ожидаем ли мы код авторизации
+    if context.user_data.get('waiting_for_auth_code'):
+        # Пытаемся использовать текст как код авторизации
+        await update.message.reply_text("⏳ Проверяю код авторизации...")
+        
+        success = google_auth.save_credentials_from_code(user_id, text.strip())
+        
+        if success:
+            await update.message.reply_text(
+                "✅ Google Calendar успешно подключен!\n\n"
+                "Теперь вы можете:\n"
+                "📅 /calendar - просмотреть события\n"
+                "💬 Или просто спросите: 'Какие у меня встречи сегодня?'"
+            )
+            context.user_data['waiting_for_auth_code'] = False
+        else:
+            await update.message.reply_text(
+                "❌ Ошибка при сохранении кода.\n\n"
+                "Возможные причины:\n"
+                "- Неверный код\n"
+                "- Код уже использован\n"
+                "- Код истек (действителен 10 минут)\n\n"
+                "Попробуйте еще раз: /connect"
+            )
+        return
+    
+    # Обычная обработка сообщения
+    await process_ai_request(update, context, text)
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     document = update.message.document
@@ -393,9 +342,7 @@ if __name__ == '__main__':
     # Команды
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('connect', connect_google))
-    application.add_handler(CommandHandler('auth', auth_code))
     application.add_handler(CommandHandler('calendar', show_calendar))
-    application.add_handler(CommandHandler('emails', show_emails))
     application.add_handler(CommandHandler('disconnect', disconnect_google))
     
     # Обработчики сообщений
@@ -403,5 +350,5 @@ if __name__ == '__main__':
     application.add_handler(MessageHandler(filters.Document.PDF, handle_document))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     
-    logging.info("Бот запущен с Agents API, веб-поиском и Google интеграцией...")
+    logging.info("Бот запущен с Agents API, веб-поиском и Google Calendar...")
     application.run_polling()

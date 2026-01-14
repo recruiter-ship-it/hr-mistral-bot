@@ -1,5 +1,6 @@
 """
-Google OAuth 2.0 authentication module for accessing user's Calendar and Gmail.
+Simplified Google OAuth 2.0 authentication for Calendar only.
+Uses out-of-band (OOB) flow for easier user experience.
 """
 
 import os
@@ -10,26 +11,25 @@ from google_auth_oauthlib.flow import Flow
 from google.auth.transport.requests import Request
 import database as db
 
-# OAuth 2.0 scopes
+# OAuth 2.0 scopes - только Calendar
 SCOPES = [
     'https://www.googleapis.com/auth/calendar.readonly',
     'https://www.googleapis.com/auth/calendar.events',
-    'https://www.googleapis.com/auth/gmail.readonly',
 ]
 
 # OAuth client configuration
-# Эти данные нужно получить из Google Cloud Console
 CLIENT_CONFIG = {
     "installed": {
         "client_id": os.getenv("GOOGLE_CLIENT_ID", "YOUR_CLIENT_ID"),
         "client_secret": os.getenv("GOOGLE_CLIENT_SECRET", "YOUR_CLIENT_SECRET"),
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
-        "redirect_uris": ["http://localhost:8080"]
+        "redirect_uris": ["urn:ietf:wg:oauth:2.0:oob"]
     }
 }
 
-REDIRECT_URI = "http://localhost:8080"
+# Используем out-of-band flow для упрощения
+REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob"
 
 
 def get_auth_url(user_id: int) -> str:
