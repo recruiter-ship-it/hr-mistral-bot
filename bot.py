@@ -76,8 +76,8 @@ if GOOGLE_CREDENTIALS_BASE64:
         logging.error(f"Error restoring credentials.json: {e}")
 
 
-# Initialize external clients with timeout
-mistral_client = Mistral(api_key=MISTRAL_API_KEY, timeout=30)
+# Initialize external clients
+mistral_client = Mistral(api_key=MISTRAL_API_KEY)
 calendar_mgr = GoogleCalendarManager()
 
 
