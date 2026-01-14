@@ -260,14 +260,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     # Normal chat with Mistral
     try:
-        search_keywords = [
-            'найди', 'поиск', 'новости', 'интернет', 'узнай', 'кто такой', 'что такое'
-        ]
-        context_text = ""
-        if any(word in text.lower() for word in search_keywords):
-            await update.message.reply_text("🔍 Ищу информацию в интернете...")
-            context_text = search_internet(text)
-
         # Retrieve recent conversation history for context (limited to 5 for faster processing)
         history = db.get_history(user_id, limit=5)
 
@@ -278,26 +270,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "НЕ используй Markdown разметку (звёздочки, жирный шрифт). "
             "Используй только обычный текст и эмодзи. "
             "ВАЖНО: Отвечай ТОЛЬКО на последний вопрос пользователя. "
-            "Не пытайся отвечать на старые вопросы из истории диалога."
+            "Не пытайся отвечать на старые вопросы из истории диалога. "
+            "Если тебе нужна актуальная информация из интернета, используй встроенный веб-поиск."
         )
         messages_list = [{"role": "system", "content": system_prompt}]
         for entry in history:
             messages_list.append({"role": entry["role"], "content": entry["content"]})
 
-        # Prepare the user message, optionally enriched with search results
-        if context_text:
-            user_content = (
-                f"Используй эти данные из интернета для ответа:\n{context_text}\n\n"
-                f"Вопрос пользователя: {text}"
-            )
-        else:
-            user_content = text
-        messages_list.append({"role": "user", "content": user_content})
+        # Add the current user message
+        messages_list.append({"role": "user", "content": text})
 
-        # Generate a response using the Mistral chat API
+        # Generate a response using the Mistral chat API with web search enabled
         response = mistral_client.chat.complete(
             model="mistral-small-latest",
             messages=messages_list,
+            tools=[{"type": "web_search"}]
         )
         ai_content = response.choices[0].message.content
 
