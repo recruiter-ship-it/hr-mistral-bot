@@ -4,7 +4,8 @@ on:
   push:
     branches: [ main ]
   schedule:
-    - cron: '0 */5 * * *'
+    # Запуск каждые 6 часов как backup (на случай сбоев)
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -14,6 +15,7 @@ concurrency:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 часов максимум для одной сессии
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -28,12 +30,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: Run Bot
+      - name: Run Bot with Auto-Restart
         env:
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: |
-          # Запускаем новый файл bot.py
-          timeout 10800s python bot.py || echo "Bot session ended"
+          # Бесконечный цикл с автоматическим перезапуском при ошибках
+          while true; do
+            echo "Starting bot at $(date)"
+            python bot.py || echo "Bot crashed, restarting in 5 seconds..."
+            sleep 5
+          done
