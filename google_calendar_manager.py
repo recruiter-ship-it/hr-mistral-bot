@@ -83,6 +83,9 @@ class GoogleCalendarManager:
             return response_text, events
             
         except Exception as e:
+            error_msg = str(e).lower()
+            if 'invalid_grant' in error_msg or 'token' in error_msg or 'credentials' in error_msg:
+                return "❌ Сессия истекла. Пожалуйста, переподключите календарь через /connect", None
             return f"❌ Ошибка при получении событий: {str(e)}", None
     
     def create_event(
@@ -140,6 +143,9 @@ class GoogleCalendarManager:
             return f"✅ Событие создано: {summary}\n🔗 {event_link}", created_event
             
         except Exception as e:
+            error_msg = str(e).lower()
+            if 'invalid_grant' in error_msg or 'token' in error_msg or 'credentials' in error_msg:
+                return "❌ Сессия истекла. Пожалуйста, переподключите календарь через /connect", None
             return f"❌ Ошибка при создании события: {str(e)}", None
     
     def find_free_slots(self, user_id: int, date: str, duration_minutes: int = 60) -> tuple:
@@ -215,6 +221,9 @@ class GoogleCalendarManager:
             return response_text, free_slots
             
         except Exception as e:
+            error_msg = str(e).lower()
+            if 'invalid_grant' in error_msg or 'token' in error_msg or 'credentials' in error_msg:
+                return "❌ Сессия истекла. Пожалуйста, переподключите календарь через /connect", None
             return f"❌ Ошибка при поиске свободных слотов: {str(e)}", None
     
     def get_today_events(self, user_id: int) -> tuple:
@@ -266,4 +275,7 @@ class GoogleCalendarManager:
             return response_text, events
             
         except Exception as e:
+            error_msg = str(e).lower()
+            if 'invalid_grant' in error_msg or 'token' in error_msg or 'credentials' in error_msg:
+                return "❌ Сессия истекла. Пожалуйста, переподключите календарь через /connect", None
             return f"❌ Ошибка: {str(e)}", None

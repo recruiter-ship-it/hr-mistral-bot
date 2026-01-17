@@ -135,10 +135,22 @@ def get_credentials(user_id: int) -> Credentials:
         )
         
         # Проверяем и обновляем токен если нужно
-        if credentials.expired and credentials.refresh_token:
-            credentials.refresh(Request())
-            # Сохраняем обновленный токен
-            save_credentials(user_id, credentials)
+        if credentials.refresh_token:
+            # Проверяем истечение токена или пытаемся обновить превентивно
+            if credentials.expired or not credentials.valid:
+                try:
+                    credentials.refresh(Request())
+                    # Сохраняем обновленный токен
+                    save_credentials(user_id, credentials)
+                    print(f"Token refreshed for user {user_id}")
+                except Exception as e:
+                    print(f"Error refreshing token for user {user_id}: {e}")
+                    # Если refresh не удался, возвращаем None - пользователю нужно переподключиться
+                    return None
+        elif not credentials.valid:
+            # Нет refresh token и токен недействителен - нужно переподключение
+            print(f"No refresh token available for user {user_id}, credentials invalid")
+            return None
         
         return credentials
         
