@@ -10,6 +10,7 @@ from mistralai import Mistral
 import database as db
 import google_auth
 from google_calendar_manager import GoogleCalendarManager
+from notifications import notification_loop
 
 # Настройка логирования
 logging.basicConfig(
@@ -398,5 +399,9 @@ if __name__ == '__main__':
     application.add_handler(MessageHandler(filters.Document.PDF, handle_document))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     
-    logging.info("Бот запущен с Agents API, веб-поиском и Google Calendar...")
+    # Запускаем notification loop в фоне
+    loop = asyncio.get_event_loop()
+    loop.create_task(notification_loop(application.bot))
+    
+    logging.info("Бот запущен с Agents API, веб-поиском, Google Calendar и уведомлениями...")
     application.run_polling()

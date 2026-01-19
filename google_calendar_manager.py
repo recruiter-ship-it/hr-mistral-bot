@@ -55,30 +55,64 @@ class GoogleCalendarManager:
             if not events:
                 return f"📅 Нет событий в календаре на ближайшие {days} дней.", None
             
-            response_text = f"📅 События в календаре (следующие {days} дней):\n\n"
+            response_text = f"*📅 События в календаре (следующие {days} дней):*\n\n"
             
+            current_date = None
             for event in events:
                 start = event['start'].get('dateTime', event['start'].get('date'))
                 summary = event.get('summary', 'Без названия')
+                event_link = event.get('htmlLink', '')
+                location = event.get('location', '')
                 
-                # Форматируем дату
+                # Форматируем дату и время
                 try:
                     if 'T' in start:
                         dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
-                        formatted_time = dt.strftime('%d.%m.%Y %H:%M')
+                        date_str = dt.strftime('%d.%m.%Y')
+                        time_str = dt.strftime('%H:%M')
+                        
+                        # Группируем по датам
+                        if current_date != date_str:
+                            if current_date is not None:
+                                response_text += "\n"
+                            # Определяем день недели
+                            weekday = dt.strftime('%A')
+                            weekday_ru = {
+                                'Monday': 'Понедельник',
+                                'Tuesday': 'Вторник',
+                                'Wednesday': 'Среда',
+                                'Thursday': 'Четверг',
+                                'Friday': 'Пятница',
+                                'Saturday': 'Суббота',
+                                'Sunday': 'Воскресенье'
+                            }.get(weekday, weekday)
+                            response_text += f"*📆 {date_str} ({weekday_ru})*\n"
+                            current_date = date_str
+                        
+                        # Событие
+                        response_text += f"\n🕐 *{time_str}* - {summary}\n"
                     else:
-                        formatted_time = start
+                        # Целодневное событие
+                        response_text += f"\n📅 *Целый день* - {summary}\n"
                 except:
-                    formatted_time = start
+                    response_text += f"\n🕐 {start} - {summary}\n"
                 
-                response_text += f"🕐 {formatted_time}\n"
-                response_text += f"   {summary}\n"
+                # Местоположение
+                if location:
+                    # Проверяем, есть ли ссылка на видеоконференцию
+                    if 'meet.google.com' in location or 'zoom.us' in location or 'teams.microsoft.com' in location:
+                        response_text += f"   📹 [Подключиться]({location})\n"
+                    else:
+                        response_text += f"   📍 {location}\n"
                 
+                # Описание
                 if 'description' in event:
-                    desc = event['description'][:100]
+                    desc = event['description'][:100].replace('\n', ' ')
                     response_text += f"   📝 {desc}...\n"
                 
-                response_text += "\n"
+                # Ссылка на событие
+                if event_link:
+                    response_text += f"   🔗 [Открыть в Google Calendar]({event_link})\n"
             
             return response_text, events
             
@@ -258,11 +292,13 @@ class GoogleCalendarManager:
             if not events:
                 return "📅 Сегодня нет запланированных событий.", None
             
-            response_text = "📅 События на сегодня:\n\n"
+            response_text = "*🌅 События на сегодня:*\n\n"
             
             for event in events:
                 start = event['start'].get('dateTime', event['start'].get('date'))
                 summary = event.get('summary', 'Без названия')
+                event_link = event.get('htmlLink', '')
+                location = event.get('location', '')
                 
                 try:
                     dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
@@ -270,7 +306,19 @@ class GoogleCalendarManager:
                 except:
                     time_str = start
                 
-                response_text += f"🕐 {time_str} - {summary}\n"
+                response_text += f"🕐 *{time_str}* - {summary}\n"
+                
+                # Местоположение/ссылка
+                if location:
+                    if 'meet.google.com' in location or 'zoom.us' in location or 'teams.microsoft.com' in location:
+                        response_text += f"   📹 [Подключиться]({location})\n"
+                    else:
+                        response_text += f"   📍 {location}\n"
+                
+                if event_link:
+                    response_text += f"   🔗 [Открыть]({event_link})\n"
+                
+                response_text += "\n"
             
             return response_text, events
             

@@ -71,3 +71,9 @@ def delete_token(user_id):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("UPDATE users SET google_token = NULL WHERE user_id = ?", (user_id,))
         conn.commit()
+
+def get_all_users_with_calendar():
+    """Get all user IDs that have Google Calendar connected."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute("SELECT user_id FROM users WHERE google_token IS NOT NULL")
+        return [row[0] for row in cursor.fetchall()]
