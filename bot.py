@@ -254,22 +254,34 @@ async def process_ai_request(update, context, user_input, is_file=False):
                     days = function_params.get('days', 7)
                     message_text, events = calendar_manager.list_events(user_id, days=days)
                     
-                    # Формируем результат для агента
+                    # Формируем результат для агента в формате FunctionResultEntry
                     tool_results.append({
-                        "call_id": tool_call.id,
-                        "content": message_text
+                        "type": "function.result",
+                        "tool_call_id": tool_call.id,
+                        "result": message_text
                     })
             
             # Отправляем результаты tool calls обратно в агента
             response = mistral_client.beta.conversations.append(
                 conversation_id=user_conversations[chat_id],
-                tool_outputs=tool_results
+                inputs=tool_results
             )
+            
+            logging.info(f"Response after tool outputs: {response}")
+            logging.info(f"Response outputs: {[out.type for out in response.outputs]}")
         
         # Получаем ответ из outputs (последний message.output)
         message_outputs = [out for out in response.outputs if out.type == 'message.output']
+        
+        # Если нет message.output, проверяем другие типы
         if not message_outputs:
-            raise Exception("Нет ответа от агента")
+            logging.error(f"No message.output found. Available outputs: {[(out.type, out) for out in response.outputs]}")
+            # Проверяем, есть ли message.content
+            message_contents = [out for out in response.outputs if out.type == 'message.content']
+            if message_contents:
+                message_outputs = message_contents
+            else:
+                raise Exception("Нет ответа от агента. Попробуйте /start для сброса разговора.")
         
         # Извлекаем текст из content (может быть строкой или списком chunks)
         content = message_outputs[-1].content
