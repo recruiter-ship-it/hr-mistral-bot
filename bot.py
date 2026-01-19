@@ -236,6 +236,36 @@ async def process_ai_request(update, context, user_input, is_file=False):
         # Сохраняем conversation_id для следующих сообщений
         user_conversations[chat_id] = response.conversation_id
         
+        # Обработка tool calls (если агент хочет вызвать функцию)
+        tool_calls = [out for out in response.outputs if out.type == 'tool.call']
+        
+        if tool_calls:
+            # Обрабатываем каждый tool call
+            tool_results = []
+            
+            for tool_call in tool_calls:
+                function_name = tool_call.name
+                function_params = tool_call.arguments if hasattr(tool_call, 'arguments') else {}
+                
+                logging.info(f"Tool call: {function_name} with params: {function_params}")
+                
+                if function_name == "get_calendar_events":
+                    # Получаем данные календаря
+                    days = function_params.get('days', 7)
+                    message_text, events = calendar_manager.list_events(user_id, days=days)
+                    
+                    # Формируем результат для агента
+                    tool_results.append({
+                        "call_id": tool_call.id,
+                        "content": message_text
+                    })
+            
+            # Отправляем результаты tool calls обратно в агента
+            response = mistral_client.beta.conversations.append(
+                conversation_id=user_conversations[chat_id],
+                tool_outputs=tool_results
+            )
+        
         # Получаем ответ из outputs (последний message.output)
         message_outputs = [out for out in response.outputs if out.type == 'message.output']
         if not message_outputs:
