@@ -55,7 +55,8 @@ class GoogleCalendarManager:
             if not events:
                 return f"📅 Нет событий в календаре на ближайшие {days} дней.", None
             
-            response_text = f"*📅 События в календаре (следующие {days} дней):*\n\n"
+            response_text = f"📅 *События в календаре (следующие {days} дней)*\n"
+            response_text += "─" * 30 + "\n\n"
             
             current_date = None
             for event in events:
@@ -74,7 +75,7 @@ class GoogleCalendarManager:
                         # Группируем по датам
                         if current_date != date_str:
                             if current_date is not None:
-                                response_text += "\n"
+                                response_text += "\n─" * 30 + "\n\n"
                             # Определяем день недели
                             weekday = dt.strftime('%A')
                             weekday_ru = {
@@ -86,33 +87,36 @@ class GoogleCalendarManager:
                                 'Saturday': 'Суббота',
                                 'Sunday': 'Воскресенье'
                             }.get(weekday, weekday)
-                            response_text += f"*📆 {date_str} ({weekday_ru})*\n"
+                            response_text += f"📆 *{date_str} ({weekday_ru})*\n\n"
                             current_date = date_str
                         
                         # Событие
-                        response_text += f"\n🕐 *{time_str}* - {summary}\n"
+                        response_text += f"🕐 *{time_str}* \u2014 {summary}\n"
                     else:
                         # Целодневное событие
-                        response_text += f"\n📅 *Целый день* - {summary}\n"
+                        response_text += f"📅 *Целый день* \u2014 {summary}\n"
                 except:
-                    response_text += f"\n🕐 {start} - {summary}\n"
+                    response_text += f"🕐 {start} \u2014 {summary}\n"
                 
                 # Местоположение
                 if location:
                     # Проверяем, есть ли ссылка на видеоконференцию
                     if 'meet.google.com' in location or 'zoom.us' in location or 'teams.microsoft.com' in location:
-                        response_text += f"   📹 [Подключиться]({location})\n"
+                        response_text += f"📹 [Подключиться]({location})\n"
                     else:
-                        response_text += f"   📍 {location}\n"
+                        response_text += f"📍 {location}\n"
                 
                 # Описание
                 if 'description' in event:
-                    desc = event['description'][:100].replace('\n', ' ')
-                    response_text += f"   📝 {desc}...\n"
+                    desc = event['description'][:80].replace('\n', ' ').strip()
+                    if desc:
+                        response_text += f"📝 _{desc}_\n"
                 
                 # Ссылка на событие
                 if event_link:
-                    response_text += f"   🔗 [Открыть в Google Calendar]({event_link})\n"
+                    response_text += f"🔗 [Открыть в календаре]({event_link})\n"
+                
+                response_text += "\n"
             
             return response_text, events
             
@@ -292,7 +296,8 @@ class GoogleCalendarManager:
             if not events:
                 return "📅 Сегодня нет запланированных событий.", None
             
-            response_text = "*🌅 События на сегодня:*\n\n"
+            response_text = "🌅 *События на сегодня*\n"
+            response_text += "─" * 30 + "\n\n"
             
             for event in events:
                 start = event['start'].get('dateTime', event['start'].get('date'))
@@ -306,17 +311,17 @@ class GoogleCalendarManager:
                 except:
                     time_str = start
                 
-                response_text += f"🕐 *{time_str}* - {summary}\n"
+                response_text += f"🕐 *{time_str}* \u2014 {summary}\n"
                 
                 # Местоположение/ссылка
                 if location:
                     if 'meet.google.com' in location or 'zoom.us' in location or 'teams.microsoft.com' in location:
-                        response_text += f"   📹 [Подключиться]({location})\n"
+                        response_text += f"📹 [Подключиться]({location})\n"
                     else:
-                        response_text += f"   📍 {location}\n"
+                        response_text += f"📍 {location}\n"
                 
                 if event_link:
-                    response_text += f"   🔗 [Открыть]({event_link})\n"
+                    response_text += f"🔗 [Открыть в календаре]({event_link})\n"
                 
                 response_text += "\n"
             

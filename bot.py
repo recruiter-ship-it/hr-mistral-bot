@@ -197,7 +197,11 @@ async def show_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Загружаю события календаря...")
     
     message, events = calendar_manager.list_events(user_id, days=days)
-    await update.message.reply_text(message)
+    await update.message.reply_text(
+        message,
+        parse_mode='Markdown',
+        disable_web_page_preview=True
+    )
 
 async def disconnect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отключить Google Calendar"""
