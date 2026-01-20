@@ -275,17 +275,21 @@ async def process_ai_request(update, context, user_input, is_file=False):
             logging.info(f"Response after tool outputs: {response}")
             logging.info(f"Response outputs: {[out.type for out in response.outputs]}")
         
-        # Получаем ответ из outputs (последний message.output)
+        # Получаем ответ из outputs
         message_outputs = [out for out in response.outputs if out.type == 'message.output']
         
         # Если нет message.output, проверяем другие типы
         if not message_outputs:
-            logging.error(f"No message.output found. Available outputs: {[(out.type, out) for out in response.outputs]}")
-            # Проверяем, есть ли message.content
-            message_contents = [out for out in response.outputs if out.type == 'message.content']
-            if message_contents:
-                message_outputs = message_contents
-            else:
+            logging.error(f"No message.output found. Available outputs: {[(out.type, getattr(out, 'content', None)) for out in response.outputs]}")
+            
+            # Пробуем найти любой output с content
+            for out in response.outputs:
+                if hasattr(out, 'content') and out.content:
+                    message_outputs = [out]
+                    logging.info(f"Using output type: {out.type}")
+                    break
+            
+            if not message_outputs:
                 raise Exception("Нет ответа от агента. Попробуйте /start для сброса разговора.")
         
         # Извлекаем текст из content (может быть строкой или списком chunks)
@@ -352,28 +356,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await process_ai_request(update, context, text)
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle PDF document uploads"""
     document = update.message.document
     caption = update.message.caption or "Проанализируй этот документ"
     chat_id = update.effective_chat.id
     
+    logging.info(f"Received document: {document.file_name}, mime_type: {document.mime_type}")
+    
     if document.mime_type == 'application/pdf':
-        file = await context.bot.get_file(document.file_id)
-        file_path = f"temp_{chat_id}_{document.file_name}"
-        await file.download_to_drive(file_path)
-        
-        text = ""
         try:
+            # Скачиваем файл
+            file = await context.bot.get_file(document.file_id)
+            file_path = f"temp_{chat_id}_{document.file_name}"
+            await file.download_to_drive(file_path)
+            
+            logging.info(f"Downloaded PDF to {file_path}")
+            
+            # Извлекаем текст
+            text = ""
             with fitz.open(file_path) as doc:
                 for page in doc:
                     text += page.get_text()
+            
+            logging.info(f"Extracted {len(text)} characters from PDF")
+            
+            # Удаляем временный файл
             os.remove(file_path)
-            user_prompt = f"{caption}\n\nСодержимое файла {document.file_name}:\n{text}"
+            
+            # Обрабатываем через AI
+            user_prompt = f"{caption}\n\nСодержимое файла {document.file_name}:\n{text[:10000]}"  # Ограничиваем 10k символов
             await process_ai_request(update, context, user_prompt, is_file=True)
+            
         except Exception as e:
-            logging.error(f"PDF Error: {e}")
-            await update.message.reply_text("Ошибка при чтении PDF.")
+            logging.error(f"PDF Error: {e}", exc_info=True)
+            await update.message.reply_text(
+                f"❌ Ошибка при чтении PDF: {str(e)}\n\n"
+                "Попробуйте еще раз или отправьте текст вручную."
+            )
     else:
-        await update.message.reply_text("Пришлите PDF файл.")
+        await update.message.reply_text("❌ Пожалуйста, отправьте PDF файл.")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка фото - пока упрощенная версия без vision"""
