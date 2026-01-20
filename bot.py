@@ -2,6 +2,7 @@ import logging
 import os
 import asyncio
 import fitz  # PyMuPDF
+from docx import Document
 import base64
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
@@ -267,30 +268,47 @@ async def process_ai_request(update, context, user_input, is_file=False):
                     })
             
             # Отправляем результаты tool calls обратно в агента
+            logging.info(f"Sending tool results: {tool_results}")
+            
             response = mistral_client.beta.conversations.append(
                 conversation_id=user_conversations[chat_id],
                 inputs=tool_results
             )
             
-            logging.info(f"Response after tool outputs: {response}")
-            logging.info(f"Response outputs: {[out.type for out in response.outputs]}")
+            logging.info(f"Response after tool calls - full object: {response}")
+            logging.info(f"Response outputs types: {[out.type for out in response.outputs]}")
+            
+            # Детальное логирование каждого output
+            for i, out in enumerate(response.outputs):
+                logging.info(f"Output {i}: type={out.type}, has_content={hasattr(out, 'content')}, content={getattr(out, 'content', None)}")
         
         # Получаем ответ из outputs
+        # Пробуем разные типы outputs
+        message_outputs = []
+        
+        # 1. Пробуем message.output
         message_outputs = [out for out in response.outputs if out.type == 'message.output']
         
-        # Если нет message.output, проверяем другие типы
+        # 2. Если нет, пробуем message.content
         if not message_outputs:
-            logging.error(f"No message.output found. Available outputs: {[(out.type, getattr(out, 'content', None)) for out in response.outputs]}")
+            message_outputs = [out for out in response.outputs if out.type == 'message.content']
+            if message_outputs:
+                logging.info("Using message.content instead of message.output")
+        
+        # 3. Если нет, пробуем любой output с content
+        if not message_outputs:
+            logging.error(f"No message.output or message.content found. Available outputs: {[(out.type, hasattr(out, 'content')) for out in response.outputs]}")
             
-            # Пробуем найти любой output с content
             for out in response.outputs:
                 if hasattr(out, 'content') and out.content:
                     message_outputs = [out]
-                    logging.info(f"Using output type: {out.type}")
+                    logging.info(f"Using fallback output type: {out.type}")
                     break
-            
-            if not message_outputs:
-                raise Exception("Нет ответа от агента. Попробуйте /start для сброса разговора.")
+        
+        if not message_outputs:
+            logging.error("FULL RESPONSE DUMP:")
+            logging.error(f"{response}")
+            raise Exception("Нет ответа от агента. Попробуйте /start для сброса разговора.")
         
         # Извлекаем текст из content (может быть строкой или списком chunks)
         content = message_outputs[-1].content
@@ -356,29 +374,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await process_ai_request(update, context, text)
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle PDF document uploads"""
+    """Handle PDF and DOC/DOCX document uploads"""
     document = update.message.document
     caption = update.message.caption or "Проанализируй этот документ"
     chat_id = update.effective_chat.id
     
     logging.info(f"Received document: {document.file_name}, mime_type: {document.mime_type}")
     
-    if document.mime_type == 'application/pdf':
+    # Поддерживаемые типы
+    supported_types = [
+        'application/pdf',
+        'application/msword',  # .doc
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'  # .docx
+    ]
+    
+    if document.mime_type in supported_types or document.file_name.endswith(('.pdf', '.doc', '.docx')):
         try:
             # Скачиваем файл
             file = await context.bot.get_file(document.file_id)
             file_path = f"temp_{chat_id}_{document.file_name}"
             await file.download_to_drive(file_path)
             
-            logging.info(f"Downloaded PDF to {file_path}")
+            logging.info(f"Downloaded document to {file_path}")
             
-            # Извлекаем текст
+            # Извлекаем текст в зависимости от типа
             text = ""
-            with fitz.open(file_path) as doc:
-                for page in doc:
-                    text += page.get_text()
             
-            logging.info(f"Extracted {len(text)} characters from PDF")
+            if document.mime_type == 'application/pdf' or file_path.endswith('.pdf'):
+                # PDF
+                with fitz.open(file_path) as doc:
+                    for page in doc:
+                        text += page.get_text()
+            else:
+                # DOC/DOCX
+                doc = Document(file_path)
+                for paragraph in doc.paragraphs:
+                    text += paragraph.text + "\n"
+            
+            logging.info(f"Extracted {len(text)} characters from document")
             
             # Удаляем временный файл
             os.remove(file_path)
@@ -394,7 +427,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Попробуйте еще раз или отправьте текст вручную."
             )
     else:
-        await update.message.reply_text("❌ Пожалуйста, отправьте PDF файл.")
+        await update.message.reply_text("❌ Пожалуйста, отправьте PDF, DOC или DOCX файл.")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка фото - пока упрощенная версия без vision"""
