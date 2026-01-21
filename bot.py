@@ -240,7 +240,7 @@ async def process_ai_request(update, context, user_input, is_file=False):
         tools = []
         
         # Проверяем, подключен ли календарь
-        if database.is_calendar_connected(user_id):
+        if db.is_calendar_connected(user_id):
             tools.append({
                 "type": "function",
                 "function": {
