@@ -1,6 +1,7 @@
 import logging
 import os
 import asyncio
+import json
 import fitz  # PyMuPDF
 from docx import Document
 import base64
@@ -216,7 +217,7 @@ async def disconnect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def process_ai_request(update, context, user_input, is_file=False):
-    """Обработка запроса через Agents API"""
+    """Обработка запроса через Chat Completion API с function calling"""
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     
@@ -225,120 +226,136 @@ async def process_ai_request(update, context, user_input, is_file=False):
     message = await update.message.reply_text("Анализирую..." if is_file else "...")
     
     try:
-        # Проверяем, есть ли уже conversation для этого пользователя
-        if chat_id in user_conversations:
-            # Продолжаем существующий разговор
-            response = mistral_client.beta.conversations.append(
-                conversation_id=user_conversations[chat_id],
-                inputs=user_input
+        # Получаем или создаем историю сообщений для пользователя
+        if chat_id not in user_conversations:
+            user_conversations[chat_id] = []
+        
+        # Добавляем сообщение пользователя
+        user_conversations[chat_id].append({
+            "role": "user",
+            "content": user_input
+        })
+        
+        # Определяем доступные функции
+        tools = []
+        
+        # Проверяем, подключен ли календарь
+        if database.is_calendar_connected(user_id):
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": "get_calendar_events",
+                    "description": "Получить события из Google Calendar пользователя на указанное количество дней вперед",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "days": {
+                                "type": "integer",
+                                "description": "Количество дней вперед для получения событий (по умолчанию 7)"
+                            }
+                        },
+                        "required": []
+                    }
+                }
+            })
+        
+        # Максимум 5 итераций для обработки tool calls
+        max_iterations = 5
+        for iteration in range(max_iterations):
+            # Вызываем Chat Completion API
+            response = mistral_client.chat.complete(
+                model="mistral-large-latest",
+                messages=[
+                    {"role": "system", "content": AGENT_INSTRUCTIONS}
+                ] + user_conversations[chat_id],
+                tools=tools if tools else None,
+                tool_choice="auto" if tools else None
             )
-        else:
-            # Начинаем новый разговор
-            response = mistral_client.beta.conversations.start(
-                agent_id=hr_agent.id,
-                inputs=user_input
-            )
-        
-        # Сохраняем conversation_id для следующих сообщений
-        user_conversations[chat_id] = response.conversation_id
-        
-        # Обработка tool calls (если агент хочет вызвать функцию)
-        tool_calls = [out for out in response.outputs if out.type == 'tool.call']
-        
-        if tool_calls:
-            # Обрабатываем каждый tool call
-            tool_results = []
             
-            for tool_call in tool_calls:
-                function_name = tool_call.name
-                function_params = tool_call.arguments if hasattr(tool_call, 'arguments') else {}
+            assistant_message = response.choices[0].message
+            
+            # Проверяем, есть ли tool calls
+            if assistant_message.tool_calls:
+                logging.info(f"Tool calls detected: {len(assistant_message.tool_calls)}")
                 
-                logging.info(f"Tool call: {function_name} with params: {function_params}")
+                # Добавляем сообщение ассистента с tool calls
+                user_conversations[chat_id].append({
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        } for tc in assistant_message.tool_calls
+                    ]
+                })
                 
-                if function_name == "get_calendar_events":
-                    # Получаем данные календаря
-                    days = function_params.get('days', 7)
-                    message_text, events = calendar_manager.list_events(user_id, days=days)
+                # Обрабатываем каждый tool call
+                for tool_call in assistant_message.tool_calls:
+                    function_name = tool_call.function.name
+                    function_args = json.loads(tool_call.function.arguments)
                     
-                    # Формируем результат для агента в формате FunctionResultEntry
-                    tool_results.append({
-                        "type": "function.result",
-                        "tool_call_id": tool_call.id,
-                        "result": message_text
-                    })
-            
-            # Отправляем результаты tool calls обратно в агента
-            logging.info(f"Sending tool results: {tool_results}")
-            
-            response = mistral_client.beta.conversations.append(
-                conversation_id=user_conversations[chat_id],
-                inputs=tool_results
-            )
-            
-            logging.info(f"Response after tool calls - full object: {response}")
-            logging.info(f"Response outputs types: {[out.type for out in response.outputs]}")
-            
-            # Детальное логирование каждого output
-            for i, out in enumerate(response.outputs):
-                logging.info(f"Output {i}: type={out.type}, has_content={hasattr(out, 'content')}, content={getattr(out, 'content', None)}")
-        
-        # Получаем ответ из outputs
-        # Пробуем разные типы outputs
-        message_outputs = []
-        
-        # 1. Пробуем message.output
-        message_outputs = [out for out in response.outputs if out.type == 'message.output']
-        
-        # 2. Если нет, пробуем message.content
-        if not message_outputs:
-            message_outputs = [out for out in response.outputs if out.type == 'message.content']
-            if message_outputs:
-                logging.info("Using message.content instead of message.output")
-        
-        # 3. Если нет, пробуем любой output с content
-        if not message_outputs:
-            logging.error(f"No message.output or message.content found. Available outputs: {[(out.type, hasattr(out, 'content')) for out in response.outputs]}")
-            
-            for out in response.outputs:
-                if hasattr(out, 'content') and out.content:
-                    message_outputs = [out]
-                    logging.info(f"Using fallback output type: {out.type}")
-                    break
-        
-        if not message_outputs:
-            logging.error("FULL RESPONSE DUMP:")
-            logging.error(f"{response}")
-            raise Exception("Нет ответа от агента. Попробуйте /start для сброса разговора.")
-        
-        # Извлекаем текст из content (может быть строкой или списком chunks)
-        content = message_outputs[-1].content
-        if isinstance(content, str):
-            full_response = content
-        elif isinstance(content, list):
-            # Собираем только текстовые чанки
-            text_chunks = [chunk.text for chunk in content if hasattr(chunk, 'text')]
-            full_response = ''.join(text_chunks)
-        else:
-            full_response = str(content)
-        
-        # Форматируем текст (оставляем Markdown)
-        full_response = format_markdown(full_response)
-        
-        # Отправляем финальный ответ с поддержкой Markdown
-        await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message.message_id,
-            text=full_response,
-            parse_mode='Markdown'
-        )
+                    logging.info(f"Calling function: {function_name} with args: {function_args}")
+                    
+                    if function_name == "get_calendar_events":
+                        days = function_args.get('days', 7)
+                        result_text, events = calendar_manager.list_events(user_id, days=days)
+                        
+                        # Добавляем результат функции
+                        user_conversations[chat_id].append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": function_name,
+                            "content": result_text
+                        })
                 
+                # Продолжаем цикл для получения финального ответа
+                continue
+            else:
+                # Нет tool calls - это финальный ответ
+                assistant_content = assistant_message.content
+                
+                # Добавляем ответ ассистента в историю
+                user_conversations[chat_id].append({
+                    "role": "assistant",
+                    "content": assistant_content
+                })
+                
+                # Ограничиваем историю последними 20 сообщениями
+                if len(user_conversations[chat_id]) > 20:
+                    user_conversations[chat_id] = user_conversations[chat_id][-20:]
+                
+                # Форматируем и отправляем ответ
+                formatted_response = format_markdown(assistant_content)
+                
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message.message_id,
+                    text=formatted_response,
+                    parse_mode='Markdown',
+                    disable_web_page_preview=True
+                )
+                
+                return
+        
+        # Если достигли максимума итераций
+        raise Exception("Превышено максимальное количество вызовов функций")
+        
     except Exception as e:
-        logging.error(f"Error in process_ai_request: {e}")
-        await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message.message_id,
-            text=f"Извини, произошла ошибка: {str(e)[:200]}"
-        )
+        logging.error(f"Error in AI request: {e}", exc_info=True)
+        error_message = f"❌ Извини, произошла ошибка: {str(e)}"
+        
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message.message_id,
+                text=error_message
+            )
+        except:
+            await update.message.reply_text(error_message)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -454,7 +471,7 @@ if __name__ == '__main__':
     
     # Обработчики сообщений
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-    application.add_handler(MessageHandler(filters.Document.PDF, handle_document))
+    application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     
     # Запускаем notification loop в фоне
