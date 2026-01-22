@@ -322,6 +322,19 @@ async def process_ai_request(update, context, user_input, is_file=False):
             "role": "user",
             "content": user_input
         })
+
+        def get_valid_messages(history):
+            """Фильтрует историю, чтобы она соответствовала правилам Mistral API"""
+            valid = []
+            for i, msg in enumerate(history):
+                role = msg.get('role')
+                # Роль 'tool' может идти только после 'assistant' с 'tool_calls'
+                if role == 'tool':
+                    if not valid or valid[-1].get('role') != 'assistant' or not valid[-1].get('tool_calls'):
+                        logging.warning(f"Skipping orphaned tool message at index {i}")
+                        continue
+                valid.append(msg)
+            return valid
         
         # Определяем доступные функции
         tools = []
@@ -356,6 +369,9 @@ async def process_ai_request(update, context, user_input, is_file=False):
             search_keywords = ["найди", "поиск", "интернет", "узнай", "google", "актуальн", "сейчас", "сегодня", "дата", "новости"]
             use_agent = tools or any(word in user_input.lower() for word in search_keywords)
             
+            # Фильтруем историю перед отправкой
+            valid_history = get_valid_messages(user_conversations[chat_id])
+
             if use_agent:
                 logging.info("Using Agents API for request")
                 
@@ -370,7 +386,7 @@ async def process_ai_request(update, context, user_input, is_file=False):
                 
                 response = mistral_client.agents.complete(
                     agent_id=hr_agent.id,
-                    messages=user_conversations[chat_id]
+                    messages=valid_history
                 )
             else:
                 logging.info("Using Chat Completion API (Mistral Large)")
@@ -378,7 +394,7 @@ async def process_ai_request(update, context, user_input, is_file=False):
                     model="mistral-large-latest",
                     messages=[
                         {"role": "system", "content": current_instructions}
-                    ] + user_conversations[chat_id]
+                    ] + valid_history
                 )
             
             assistant_message = response.choices[0].message
