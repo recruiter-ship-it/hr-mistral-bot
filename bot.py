@@ -392,11 +392,11 @@ async def process_ai_request(update, context, user_input, is_file=False):
                 except Exception as update_error:
                     logging.error(f"Failed to update agent instructions: {update_error}")
                 
-                # ВАЖНО: Передаем инструменты явно, чтобы агент мог их использовать
+                # Для агента НЕ передаем инструменты явно, так как они уже настроены в самом агенте на сервере
+                # Это предотвращает ошибку "Cannot set function calling tools in the request and have tools in the agent"
                 response = mistral_client.agents.complete(
                     agent_id=hr_agent.id,
-                    messages=valid_history,
-                    tools=tools
+                    messages=valid_history
                 )
             else:
                 logging.info("Using Chat Completion API (Mistral Large)")
