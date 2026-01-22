@@ -1,5 +1,5 @@
 python-telegram-bot
-mistralai
+google-genai
 PyMuPDF
 python-docx
 google-auth

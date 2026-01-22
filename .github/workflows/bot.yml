@@ -1,4 +1,4 @@
-name: HR Mistral Bot Runner
+name: HR Gemini Bot Runner
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: hr-mistral-bot
+  group: hr-gemini-bot
   cancel-in-progress: true
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
       
       - name: Run Bot with Auto-Restart
         env:
-          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
