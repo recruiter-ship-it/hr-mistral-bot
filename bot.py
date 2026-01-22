@@ -128,7 +128,7 @@ def get_gemini_messages(history):
     gemini_messages = []
     for msg in history:
         role = "user" if msg["role"] == "user" else "model"
-        gemini_messages.append(types.Content(role=role, parts=[types.Part.from_text(msg["content"])]))
+        gemini_messages.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
     return gemini_messages
 
 async def process_ai_request(update, context, user_input, is_file=False):
