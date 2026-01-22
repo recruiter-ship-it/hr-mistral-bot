@@ -364,49 +364,40 @@ async def process_ai_request(update, context, user_input, is_file=False):
         
         for iteration in range(max_iterations):
             # Проверяем, нужно ли использовать агента
-            # Мы используем Agents API, если есть доступные инструменты или запрос на поиск/актуальную информацию
-            search_keywords = [
-                "найди", "поиск", "интернет", "узнай", "google", "актуальн", 
-                "сейчас", "сегодня", "дата", "новости", "кто", "президент", 
-                "курс", "цена", "сколько", "события", "solana", "bitcoin", "crypto", "цена", "стоимость"
+            # Список инструментов для прямого вызова через Chat API
+            chat_tools = [
+                {"type": "web_search"},
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_calendar_events",
+                        "description": "Get user's calendar events for specified number of days",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "days": {
+                                    "type": "integer",
+                                    "description": "Number of days to look ahead (default: 7)"
+                                }
+                            }
+                        }
+                    }
+                }
             ]
-            use_agent = tools or any(word in user_input.lower() for word in search_keywords)
-            
+
             # Фильтруем историю перед отправкой
             valid_history = get_valid_messages(user_conversations[chat_id])
 
-            if use_agent:
-                logging.info(f"Using Agents API for request. Triggered by keywords or tools.")
-                
-                # Если запрос касается цен или курсов, добавляем жесткое требование поиска в инструкции
-                agent_custom_instructions = current_instructions
-                if any(word in user_input.lower() for word in ["цена", "курс", "стоимость", "сколько", "solana", "bitcoin"]):
-                    agent_custom_instructions += "\n\nВНИМАНИЕ: Пользователь спрашивает о текущей цене или курсе. Ты ОБЯЗАН использовать `web_search` прямо сейчас, чтобы дать точный ответ. Не используй свои внутренние данные."
-
-                # Обновляем инструкции агента перед вызовом
-                try:
-                    mistral_client.beta.agents.update(
-                        agent_id=hr_agent.id,
-                        instructions=agent_custom_instructions
-                    )
-                except Exception as update_error:
-                    logging.error(f"Failed to update agent instructions: {update_error}")
-                
-                # Для агента НЕ передаем инструменты явно, так как они уже настроены в самом агенте на сервере
-                # Это предотвращает ошибку "Cannot set function calling tools in the request and have tools in the agent"
-                response = mistral_client.agents.complete(
-                    agent_id=hr_agent.id,
-                    messages=valid_history
-                )
-            else:
-                logging.info("Using Chat Completion API (Mistral Large)")
-                response = mistral_client.chat.complete(
-                    model="mistral-large-latest",
-                    messages=[
-                        {"role": "system", "content": current_instructions}
-                    ] + valid_history,
-                    tools=tools
-                )
+            # Мы всегда используем Chat Completion API с Mistral Large для максимального интеллекта
+            # И передаем инструменты (включая web_search) явно в каждом запросе
+            logging.info("Using Chat Completion API (Mistral Large) with explicit tools")
+            response = mistral_client.chat.complete(
+                model="mistral-large-latest",
+                messages=[
+                    {"role": "system", "content": current_instructions}
+                ] + valid_history,
+                tools=chat_tools
+            )
             
             assistant_message = response.choices[0].message
             
