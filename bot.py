@@ -377,6 +377,11 @@ async def process_ai_request(update, context, user_input, is_file=False):
                 # Обрабатываем каждый tool call
                 for tool_call in assistant_message.tool_calls:
                     function_name = tool_call.function.name
+                    
+                    # Проверяем, является ли это встроенным инструментом (web_search)
+                    if not tool_call.function:
+                        continue
+                        
                     function_args = json.loads(tool_call.function.arguments)
                     
                     logging.info(f"Calling function: {function_name} with args: {function_args}")
@@ -391,6 +396,17 @@ async def process_ai_request(update, context, user_input, is_file=False):
                             "tool_call_id": tool_call.id,
                             "name": function_name,
                             "content": result_text
+                        })
+                    else:
+                        # Для неизвестных функций или встроенных инструментов, которые Mistral обрабатывает сам
+                        # Если Mistral вернул tool_call для web_search, мы не должны его обрабатывать вручную здесь,
+                        # но если он попал сюда, добавим пустой ответ, чтобы не нарушать порядок ролей
+                        logging.warning(f"Unknown function call: {function_name}")
+                        user_conversations[chat_id].append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": function_name,
+                            "content": "Выполнено"
                         })
                 
                 # Продолжаем цикл для получения финального ответа
