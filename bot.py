@@ -92,7 +92,7 @@ def initialize_agent():
     global hr_agent
     try:
         hr_agent = mistral_client.beta.agents.create(
-            model="mistral-small-latest",
+            model="mistral-large-latest",
             name="HR Assistant Bot",
             description="Экспертный HR-ассистент для рекрутинга, анализа резюме и HR-стратегий с автоматическим веб-поиском",
             instructions=AGENT_INSTRUCTIONS,
@@ -364,40 +364,43 @@ async def process_ai_request(update, context, user_input, is_file=False):
         
         for iteration in range(max_iterations):
             # Проверяем, нужно ли использовать агента
-            # Список инструментов для прямого вызова через Chat API
-            chat_tools = [
-                {"type": "web_search"},
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "get_calendar_events",
-                        "description": "Get user's calendar events for specified number of days",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "days": {
-                                    "type": "integer",
-                                    "description": "Number of days to look ahead (default: 7)"
-                                }
-                            }
-                        }
-                    }
-                }
+            # Мы возвращаемся к использованию Agents API для поиска, так как прямое указание web_search 
+            # в Chat API вызывает ошибки валидации в текущей версии SDK.
+            # Но мы будем использовать Mistral Large внутри агента для качества.
+            
+            search_keywords = [
+                "найди", "поиск", "интернет", "узнай", "google", "актуальн", 
+                "сейчас", "сегодня", "дата", "новости", "кто", "президент", 
+                "курс", "цена", "сколько", "события", "solana", "bitcoin", "crypto"
             ]
+            use_agent = any(word in user_input.lower() for word in search_keywords) or tools
 
             # Фильтруем историю перед отправкой
             valid_history = get_valid_messages(user_conversations[chat_id])
 
-            # Мы всегда используем Chat Completion API с Mistral Large для максимального интеллекта
-            # И передаем инструменты (включая web_search) явно в каждом запросе
-            logging.info("Using Chat Completion API (Mistral Large) with explicit tools")
-            response = mistral_client.chat.complete(
-                model="mistral-large-latest",
-                messages=[
-                    {"role": "system", "content": current_instructions}
-                ] + valid_history,
-                tools=chat_tools
-            )
+            if use_agent:
+                logging.info("Using Agents API for search/tools")
+                # Обновляем инструкции агента перед вызовом
+                try:
+                    mistral_client.beta.agents.update(
+                        agent_id=hr_agent.id,
+                        instructions=current_instructions
+                    )
+                except Exception as update_error:
+                    logging.error(f"Failed to update agent instructions: {update_error}")
+                
+                response = mistral_client.agents.complete(
+                    agent_id=hr_agent.id,
+                    messages=valid_history
+                )
+            else:
+                logging.info("Using Chat Completion API (Mistral Large)")
+                response = mistral_client.chat.complete(
+                    model="mistral-large-latest",
+                    messages=[
+                        {"role": "system", "content": current_instructions}
+                    ] + valid_history
+                )
             
             assistant_message = response.choices[0].message
             
