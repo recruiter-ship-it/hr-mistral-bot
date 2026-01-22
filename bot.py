@@ -13,6 +13,7 @@ import database as db
 import google_auth
 from google_calendar_manager import GoogleCalendarManager
 from notifications import notification_loop
+from datetime import datetime
 
 # Настройка логирования
 logging.basicConfig(
@@ -81,6 +82,11 @@ calendar_manager = GoogleCalendarManager()
 
 # Хранилище conversation_id для каждого пользователя
 user_conversations = {}
+
+def get_current_instructions():
+    """Возвращает инструкции с актуальной датой"""
+    current_date = datetime.now().strftime("%d.%m.%Y")
+    return f"Сегодняшняя дата: {current_date}\n\n" + AGENT_INSTRUCTIONS
 
 def initialize_agent():
     """Создание агента при старте бота"""
@@ -342,21 +348,29 @@ async def process_ai_request(update, context, user_input, is_file=False):
         
         # Максимум 5 итераций для обработки tool calls
         max_iterations = 5
+        current_instructions = get_current_instructions()
+        
         for iteration in range(max_iterations):
-            # Проверяем, нужно ли использовать агента (если есть инструменты или запрос на поиск)
-            # Мы используем Agents API, если есть доступные инструменты
-            if tools or any(word in user_input.lower() for word in ["найди", "поиск", "интернет", "узнай", "google"]):
+            # Проверяем, нужно ли использовать агента
+            # Мы используем Agents API, если есть доступные инструменты или запрос на поиск/актуальную информацию
+            search_keywords = ["найди", "поиск", "интернет", "узнай", "google", "актуальн", "сейчас", "сегодня", "дата", "новости"]
+            use_agent = tools or any(word in user_input.lower() for word in search_keywords)
+            
+            if use_agent:
                 logging.info("Using Agents API for request")
+                # Для агента мы не можем передать системный промпт напрямую в messages, 
+                # но мы можем добавить его как первое сообщение, если история пуста
+                messages_to_send = user_conversations[chat_id]
                 response = mistral_client.agents.complete(
                     agent_id=hr_agent.id,
-                    messages=user_conversations[chat_id]
+                    messages=messages_to_send
                 )
             else:
                 logging.info("Using Chat Completion API (Mistral Large)")
                 response = mistral_client.chat.complete(
                     model="mistral-large-latest",
                     messages=[
-                        {"role": "system", "content": AGENT_INSTRUCTIONS}
+                        {"role": "system", "content": current_instructions}
                     ] + user_conversations[chat_id]
                 )
             
