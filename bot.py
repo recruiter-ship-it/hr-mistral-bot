@@ -142,9 +142,91 @@ async def process_ai_request(update, context, user_input, is_file=False):
                     try:
                         args = json.loads(tool_call.function.arguments)
                         days = args.get('days', 7) # По умолчанию 7 дней
-                        result = GoogleCalendarManager(user_id).get_events(days)
+                        
+                        # Исправленный вызов: GoogleCalendarManager() и list_events(user_id, days)
+                        manager = GoogleCalendarManager()
+                        result_text, _ = manager.list_events(user_id, days)
+                        
+                        # Передаем только текст, так как Mistral не нужен полный JSON
+                        result = result_text 
                     except Exception as e:
-                        result = {"error": f"Ошибка при вызове календаря: {e}"}
+                        result = f"Ошибка при вызове календаря: {e}"
+                    
+                    # Форматируем результат для Mistral
+                    tool_results.append({
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": "get_calendar_events",
+                        "content": result
+                    })
+            
+            history.extend(tool_results)
+
+            # Финальный вызов с результатами инструментов
+            final_response = mistral_client.chat(
+                model="mistral-large-latest",
+                messages=[{"role": "system", "content": get_current_instructions()}] + history
+            )
+            final_content = final_response.choices[0].message.content
+            history.append(final_response.choices[0].message)
+        else:
+            # Если инструментов не было, используем первый ответ
+            final_content = response.choices[0].message.content
+
+        user_conversations[chat_id] = history
+        await context.bot.edit_message_text(chat_id=chat_id, message_id=message.message_id, text=final_content, parse_mode='Markdown')
+
+    except Exception as e:
+        logging.error(f"AI Error: {e}")
+        await context.bot.edit_message_text(chat_id=chat_id, message_id=message.message_id, text=f"❌ Ошибка: {str(e)}")
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get('waiting_for_auth_code'):
+        code = update.message.text
+        if google_auth.save_credentials(update.effective_user.id, code):
+            await update.message.reply_text("✅ Календарь успешно подключен!")
+        else:
+            await update.message.reply_text("❌ Ошибка подключения. Проверьте код.")
+        context.user_data['waiting_for_auth_code'] = False
+        return
+    
+    await process_ai_request(update, context, update.message.text)
+
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    doc = update.message.document
+    if not doc.file_name.lower().endswith('.pdf'):
+        await update.message.reply_text("Пожалуйста, пришлите резюме в формате PDF.")
+        return
+    
+    file = await context.bot.get_file(doc.file_id)
+    file_path = f"temp_{doc.file_id}.pdf"
+    await file.download_to_drive(file_path)
+    
+    text = ""
+    with fitz.open(file_path) as pdf:
+        for page in pdf:
+            text += page.get_text()
+    
+    os.remove(file_path)
+    await process_ai_request(update, context, f"Проанализируй это резюме:\n\n{text}", is_file=True)
+
+if __name__ == '__main__':
+    db.init_db()
+    
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("connect", connect_google))
+    app.add_handler(CommandHandler("calendar", show_calendar))
+    app.add_handler(CommandHandler("disconnect", disconnect_google))
+    app.add_handler(MessageHandler(filters.Document.PDF, handle_document))
+    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+    
+    loop = asyncio.get_event_loop()
+    loop.create_task(notification_loop(app))
+    
+    print("Бот запущен...")
+    app.run_polling()
                     
                     tool_results.append({
                         "tool_call_id": tool_call.id,
