@@ -77,3 +77,9 @@ def get_all_users_with_calendar():
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute("SELECT user_id FROM users WHERE google_token IS NOT NULL")
         return [row[0] for row in cursor.fetchall()]
+
+def is_calendar_connected(user_id):
+    """Check if user has Google Calendar connected."""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute("SELECT google_token FROM users WHERE user_id = ? AND google_token IS NOT NULL", (user_id,))
+        return cursor.fetchone() is not None
