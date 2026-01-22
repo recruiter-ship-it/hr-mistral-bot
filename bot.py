@@ -343,15 +343,22 @@ async def process_ai_request(update, context, user_input, is_file=False):
         # Максимум 5 итераций для обработки tool calls
         max_iterations = 5
         for iteration in range(max_iterations):
-            # Вызываем Chat Completion API
-            response = mistral_client.chat.complete(
-                model="mistral-large-latest",
-                messages=[
-                    {"role": "system", "content": AGENT_INSTRUCTIONS}
-                ] + user_conversations[chat_id],
-                tools=tools if tools else None,
-                tool_choice="auto" if tools else None
-            )
+            # Проверяем, нужно ли использовать агента (если есть инструменты или запрос на поиск)
+            # Мы используем Agents API, если есть доступные инструменты
+            if tools or any(word in user_input.lower() for word in ["найди", "поиск", "интернет", "узнай", "google"]):
+                logging.info("Using Agents API for request")
+                response = mistral_client.agents.complete(
+                    agent_id=hr_agent.id,
+                    messages=user_conversations[chat_id]
+                )
+            else:
+                logging.info("Using Chat Completion API (Mistral Large)")
+                response = mistral_client.chat.complete(
+                    model="mistral-large-latest",
+                    messages=[
+                        {"role": "system", "content": AGENT_INSTRUCTIONS}
+                    ] + user_conversations[chat_id]
+                )
             
             assistant_message = response.choices[0].message
             
