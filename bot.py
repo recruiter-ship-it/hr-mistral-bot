@@ -121,8 +121,11 @@ def initialize_agent():
 
 def format_markdown(text):
     """Форматирование текста для Telegram (поддержка Markdown)"""
-    # Telegram поддерживает MarkdownV2, но мы используем HTML для надежности
-    # Конвертируем базовый Markdown в Telegram-совместимый формат
+    if not text:
+        return ""
+    # Базовая очистка для предотвращения ошибок парсинга Markdown
+    # В Telegram Markdown (v1) наиболее критичны незакрытые * и _
+    # Мы просто возвращаем текст, но в send_long_message добавим fallback на обычный текст
     return text
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -220,26 +223,48 @@ async def send_long_message(context, chat_id, text, parse_mode='Markdown', reply
     """Отправка длинных сообщений, разбивая их на части"""
     MAX_LENGTH = 4000
     
-    if len(text) <= MAX_LENGTH:
-        if edit_message_id:
-            try:
+    async def safe_send(text_part, msg_id=None):
+        try:
+            if msg_id:
                 return await context.bot.edit_message_text(
                     chat_id=chat_id,
-                    message_id=edit_message_id,
-                    text=text,
+                    message_id=msg_id,
+                    text=text_part,
                     parse_mode=parse_mode,
                     disable_web_page_preview=True
                 )
-            except Exception as e:
-                logging.warning(f"Could not edit message: {e}. Sending new instead.")
-        
-        return await context.bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            parse_mode=parse_mode,
-            reply_to_message_id=reply_to_message_id,
-            disable_web_page_preview=True
-        )
+            else:
+                return await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=text_part,
+                    parse_mode=parse_mode,
+                    reply_to_message_id=reply_to_message_id,
+                    disable_web_page_preview=True
+                )
+        except BadRequest as e:
+            if "Can't parse entities" in str(e):
+                # Если ошибка парсинга, отправляем как обычный текст без разметки
+                logging.warning(f"Markdown parsing failed, falling back to plain text: {e}")
+                if msg_id:
+                    return await context.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=msg_id,
+                        text=text_part,
+                        parse_mode=None,
+                        disable_web_page_preview=True
+                    )
+                else:
+                    return await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=text_part,
+                        parse_mode=None,
+                        reply_to_message_id=reply_to_message_id,
+                        disable_web_page_preview=True
+                    )
+            raise e
+
+    if len(text) <= MAX_LENGTH:
+        return await safe_send(text, edit_message_id)
 
     # Разбиваем текст на части
     parts = []
@@ -266,31 +291,10 @@ async def send_long_message(context, chat_id, text, parse_mode='Markdown', reply
         if not part: continue
         
         if first_msg and edit_message_id:
-            try:
-                await context.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=edit_message_id,
-                    text=part,
-                    parse_mode=parse_mode,
-                    disable_web_page_preview=True
-                )
-            except Exception as e:
-                logging.warning(f"Could not edit first part: {e}. Sending new instead.")
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=part,
-                    parse_mode=parse_mode,
-                    reply_to_message_id=reply_to_message_id,
-                    disable_web_page_preview=True
-                )
+            await safe_send(part, edit_message_id)
             first_msg = False
         else:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=part,
-                parse_mode=parse_mode,
-                disable_web_page_preview=True
-            )
+            await safe_send(part)
             await asyncio.sleep(0.1) # Небольшая задержка между сообщениями
 
 async def process_ai_request(update, context, user_input, is_file=False):
