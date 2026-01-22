@@ -358,12 +358,19 @@ async def process_ai_request(update, context, user_input, is_file=False):
             
             if use_agent:
                 logging.info("Using Agents API for request")
-                # Для агента мы не можем передать системный промпт напрямую в messages, 
-                # но мы можем добавить его как первое сообщение, если история пуста
-                messages_to_send = user_conversations[chat_id]
+                
+                # Обновляем инструкции агента перед вызовом, чтобы он знал текущую дату
+                try:
+                    mistral_client.beta.agents.update(
+                        agent_id=hr_agent.id,
+                        instructions=current_instructions
+                    )
+                except Exception as update_error:
+                    logging.error(f"Failed to update agent instructions: {update_error}")
+                
                 response = mistral_client.agents.complete(
                     agent_id=hr_agent.id,
-                    messages=messages_to_send
+                    messages=user_conversations[chat_id]
                 )
             else:
                 logging.info("Using Chat Completion API (Mistral Large)")
