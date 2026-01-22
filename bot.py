@@ -368,7 +368,7 @@ async def process_ai_request(update, context, user_input, is_file=False):
             search_keywords = [
                 "найди", "поиск", "интернет", "узнай", "google", "актуальн", 
                 "сейчас", "сегодня", "дата", "новости", "кто", "президент", 
-                "курс", "цена", "сколько", "события"
+                "курс", "цена", "сколько", "события", "solana", "bitcoin", "crypto", "цена", "стоимость"
             ]
             use_agent = tools or any(word in user_input.lower() for word in search_keywords)
             
@@ -376,13 +376,18 @@ async def process_ai_request(update, context, user_input, is_file=False):
             valid_history = get_valid_messages(user_conversations[chat_id])
 
             if use_agent:
-                logging.info("Using Agents API for request")
+                logging.info(f"Using Agents API for request. Triggered by keywords or tools.")
                 
-                # Обновляем инструкции агента перед вызовом, чтобы он знал текущую дату
+                # Если запрос касается цен или курсов, добавляем жесткое требование поиска в инструкции
+                agent_custom_instructions = current_instructions
+                if any(word in user_input.lower() for word in ["цена", "курс", "стоимость", "сколько", "solana", "bitcoin"]):
+                    agent_custom_instructions += "\n\nВНИМАНИЕ: Пользователь спрашивает о текущей цене или курсе. Ты ОБЯЗАН использовать `web_search` прямо сейчас, чтобы дать точный ответ. Не используй свои внутренние данные."
+
+                # Обновляем инструкции агента перед вызовом
                 try:
                     mistral_client.beta.agents.update(
                         agent_id=hr_agent.id,
-                        instructions=current_instructions
+                        instructions=agent_custom_instructions
                     )
                 except Exception as update_error:
                     logging.error(f"Failed to update agent instructions: {update_error}")
