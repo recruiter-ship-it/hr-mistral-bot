@@ -391,9 +391,9 @@ async def process_ai_request(update, context, user_input, is_file=False):
                     messages=valid_history
                 )
             else:
-                logging.info("Using Chat Completion API (Mistral Large)")
+                logging.info("Using Chat Completion API (Mistral Thought)")
                 response = mistral_client.chat.complete(
-                    model="mistral-large-latest",
+                    model="mistral-thought-2412",
                     messages=[
                         {"role": "system", "content": current_instructions}
                     ] + valid_history
