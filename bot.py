@@ -39,6 +39,37 @@ AGENT_INSTRUCTIONS = """
 mistral_client = Mistral(api_key=MISTRAL_API_KEY)
 
 # Хранилище conversation_id для каждого пользователя
+
+async def connect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if db.is_calendar_connected(user_id):
+        await update.message.reply_text("✅ Ваш Google Календарь уже подключен.")
+        return
+    
+    auth_url = google_auth.get_auth_url(user_id)
+    await update.message.reply_text(
+        f"Для подключения Google Календаря перейдите по ссылке:\n{auth_url}\n\n"
+        "Скопируйте код, который появится, и отправьте его мне в следующем сообщении."
+    )
+    context.user_data['waiting_for_auth_code'] = True
+
+async def show_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not db.is_calendar_connected(user_id):
+        await update.message.reply_text("❌ Google Календарь не подключен. Используйте команду /connect.")
+        return
+    
+    # Запуск AI для использования инструмента get_calendar_events
+    await process_ai_request(update, context, "Покажи мне события в моем календаре на ближайшие 7 дней.")
+
+async def disconnect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if google_auth.clear_credentials(user_id):
+        await update.message.reply_text("✅ Google Календарь успешно отключен.")
+    else:
+        await update.message.reply_text("❌ Ошибка при отключении. Возможно, он и не был подключен.")
+
+
 user_conversations = {}
 
 def get_current_instructions():
