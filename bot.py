@@ -3,12 +3,12 @@ import os
 import asyncio
 import json
 import fitz  # PyMuPDF
-from docx import Document
-import base64
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 from telegram.error import BadRequest
-from mistralai import Mistral
+from mistralai.client import MistralClient
+from mistralai.models.chat_completion import ToolCall
+
 import database as db
 import google_auth
 from google_calendar_manager import GoogleCalendarManager
@@ -22,24 +22,30 @@ logging.basicConfig(
 )
 
 # API Ключи
-MISTRAL_API_KEY = "WOkX5dBJuq8I9sMkVqmlpNwjVrzX19i3"
-TELEGRAM_BOT_TOKEN = "8399347076:AAFLtRxXEKESWuTQb19vc6mhMQph7rHxsLg"
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "WOkX5dBJuq8I9sMkVqmlpNwjVrzX19i3")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8399347076:AAFLtRxXEKESWuTQb19vc6mhMQph7rHxsLg")
 
-# Системный промпт для агента
+# Системный промпт
 AGENT_INSTRUCTIONS = """
 Ты — **HRик HуяRік**, экспертный ИИ-ассистент для HR-команды и рекрутеров. Твоя цель — повышать эффективность HR-процессов, помогать нанимать лучших талантов и развивать корпоративную культуру.
 
-Твои знания ограничены началом 2024 года. Сейчас 2026 год. 
+Твои знания ограничены началом 2024 года. Сейчас 2026 год.
 ВАЖНО: Для любых вопросов о текущих событиях, ценах, курсах валют, политиках или новостях ты ОБЯЗАН использовать инструмент `web_search`. Не пытайся угадать ответ.
 
 РАССУЖДЕНИЕ (Chain of Thought): Перед тем как дать ответ, проанализируй задачу, разбей её на шаги и убедись в актуальности данных.
 """
 
 # Инициализация клиента Mistral
-mistral_client = Mistral(api_key=MISTRAL_API_KEY)
+mistral_client = MistralClient(api_key=MISTRAL_API_KEY)
 
-# Хранилище conversation_id для каждого пользователя
+# Хранилище для истории разговоров
+user_conversations = {}
 
+def get_current_instructions():
+    current_date = datetime.now().strftime("%d.%m.%Y")
+    return f"Сегодняшняя дата: {current_date}\n\n" + AGENT_INSTRUCTIONS
+
+# --- Команды для Google Calendar ---
 async def connect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if db.is_calendar_connected(user_id):
@@ -58,8 +64,6 @@ async def show_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not db.is_calendar_connected(user_id):
         await update.message.reply_text("❌ Google Календарь не подключен. Используйте команду /connect.")
         return
-    
-    # Запуск AI для использования инструмента get_calendar_events
     await process_ai_request(update, context, "Покажи мне события в моем календаре на ближайшие 7 дней.")
 
 async def disconnect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -69,14 +73,7 @@ async def disconnect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Ошибка при отключении. Возможно, он и не был подключен.")
 
-
-user_conversations = {}
-
-def get_current_instructions():
-    """Возвращает инструкции с актуальной датой"""
-    current_date = datetime.now().strftime("%d.%m.%Y")
-    return f"Сегодняшняя дата: {current_date}\n\n" + AGENT_INSTRUCTIONS
-
+# --- Основная логика бота ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if chat_id in user_conversations:
@@ -85,26 +82,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Привет! Я *HRик HуяRік* — твой экспертный ИИ-ассистент с поиском как в Le Chat.\n\n"
         "Я могу:\n"
-        "✅ Искать актуальную информацию в интернете (цены, новости, факты)\n"
-        "✅ Анализировать резюме и помогать с HR-задачами\n"
-        "✅ Работать с твоим Google Calendar\n\n"
-        "Пришли мне вопрос или PDF резюме!",
+        "✅ Искать актуальную информацию в интернете\n"
+        "✅ Анализировать резюме (PDF)\n"
+        "✅ Работать с Google Calendar (/connect, /calendar, /disconnect)\n\n"
+        "Пришли мне вопрос или файл!",
         parse_mode='Markdown'
     )
 
-async def send_long_message(context, chat_id, text, parse_mode='Markdown', reply_to_message_id=None, edit_message_id=None):
-    """Отправка длинных сообщений с fallback на обычный текст"""
+async def send_long_message(context, chat_id, text, **kwargs):
     MAX_LENGTH = 4000
     try:
-        if edit_message_id:
-            await context.bot.edit_message_text(chat_id=chat_id, message_id=edit_message_id, text=text[:MAX_LENGTH], parse_mode=parse_mode, disable_web_page_preview=True)
-        else:
-            await context.bot.send_message(chat_id=chat_id, text=text[:MAX_LENGTH], parse_mode=parse_mode, reply_to_message_id=reply_to_message_id, disable_web_page_preview=True)
+        await context.bot.send_message(chat_id=chat_id, text=text[:MAX_LENGTH], parse_mode='Markdown', **kwargs)
     except BadRequest:
-        if edit_message_id:
-            await context.bot.edit_message_text(chat_id=chat_id, message_id=edit_message_id, text=text[:MAX_LENGTH], parse_mode=None, disable_web_page_preview=True)
-        else:
-            await context.bot.send_message(chat_id=chat_id, text=text[:MAX_LENGTH], parse_mode=None, reply_to_message_id=reply_to_message_id, disable_web_page_preview=True)
+        await context.bot.send_message(chat_id=chat_id, text=text[:MAX_LENGTH], parse_mode=None, **kwargs)
 
 async def process_ai_request(update, context, user_input, is_file=False):
     chat_id = update.effective_chat.id
@@ -117,58 +107,68 @@ async def process_ai_request(update, context, user_input, is_file=False):
         user_conversations[chat_id] = []
     
     user_conversations[chat_id].append({"role": "user", "content": user_input})
-    
-    # Ограничиваем историю последних 10 сообщений
     history = user_conversations[chat_id][-10:]
     
-    # Инструменты
-    tools = [{"type": "web_search"}]
+    # Определение доступных инструментов
+    tools = [{"type": "web_search"}] # Всегда предлагаем поиск
     if db.is_calendar_connected(user_id):
         tools.append({
             "type": "function",
             "function": {
                 "name": "get_calendar_events",
-                "description": "Get calendar events",
-                "parameters": {"type": "object", "properties": {"days": {"type": "integer"}}}
+                "description": "Получить события из Google Календаря на указанное количество дней.",
+                "parameters": {"type": "object", "properties": {"days": {"type": "integer", "description": "Количество дней для просмотра."}}}
             }
         })
 
     try:
-        # Прямой вызов Chat API с инструментами
-        response = mistral_client.chat.complete(
+        # Первый вызов для определения, нужен ли инструмент
+        response = mistral_client.chat(
             model="mistral-large-latest",
             messages=[{"role": "system", "content": get_current_instructions()}] + history,
-            tools=tools
+            tools=tools,
+            tool_choice="any"
         )
         
-        # Обработка вызовов инструментов
-        if response.choices[0].message.tool_calls:
-            tool_calls = response.choices[0].message.tool_calls
-            history.append(response.choices[0].message)
-            
+        history.append(response.choices[0].message)
+        tool_calls = response.choices[0].message.tool_calls
+
+        # Если есть вызовы инструментов, обрабатываем их
+        if tool_calls:
+            tool_results = []
             for tool_call in tool_calls:
-                if tool_call.function and tool_call.function.name == "get_calendar_events":
-                    result = db.get_calendar_events(user_id)
-                    history.append({
+                if tool_call.function.name == "get_calendar_events":
+                    # Безопасное извлечение аргументов
+                    try:
+                        args = json.loads(tool_call.function.arguments)
+                        days = args.get('days', 7) # По умолчанию 7 дней
+                        result = GoogleCalendarManager(user_id).get_events(days)
+                    except Exception as e:
+                        result = {"error": f"Ошибка при вызове календаря: {e}"}
+                    
+                    tool_results.append({
+                        "tool_call_id": tool_call.id,
                         "role": "tool",
                         "name": "get_calendar_events",
-                        "content": json.dumps(result),
-                        "tool_call_id": tool_call.id
+                        "content": json.dumps(result, ensure_ascii=False)
                     })
             
-            # Финальный ответ после инструментов
-            response = mistral_client.chat.complete(
-                model="mistral-large-latest",
-                messages=[{"role": "system", "content": get_current_instructions()}] + history,
-                tools=tools
-            )
+            history.extend(tool_results)
 
-        final_content = response.choices[0].message.content
-        history.append(response.choices[0].message)
+            # Финальный вызов с результатами инструментов
+            final_response = mistral_client.chat(
+                model="mistral-large-latest",
+                messages=[{"role": "system", "content": get_current_instructions()}] + history
+            )
+            final_content = final_response.choices[0].message.content
+            history.append(final_response.choices[0].message)
+        else:
+            # Если инструментов не было, используем первый ответ
+            final_content = response.choices[0].message.content
+
         user_conversations[chat_id] = history
-        
-        await send_long_message(context, chat_id, final_content, edit_message_id=message.message_id)
-        
+        await context.bot.edit_message_text(chat_id=chat_id, message_id=message.message_id, text=final_content, parse_mode='Markdown')
+
     except Exception as e:
         logging.error(f"AI Error: {e}")
         await context.bot.edit_message_text(chat_id=chat_id, message_id=message.message_id, text=f"❌ Ошибка: {str(e)}")
@@ -204,7 +204,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await process_ai_request(update, context, f"Проанализируй это резюме:\n\n{text}", is_file=True)
 
 if __name__ == '__main__':
-    # Инициализация БД
     db.init_db()
     
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
@@ -216,7 +215,6 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.Document.PDF, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     
-    # Запуск уведомлений в фоне
     loop = asyncio.get_event_loop()
     loop.create_task(notification_loop(app))
     
