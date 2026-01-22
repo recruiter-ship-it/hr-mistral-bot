@@ -392,9 +392,11 @@ async def process_ai_request(update, context, user_input, is_file=False):
                 except Exception as update_error:
                     logging.error(f"Failed to update agent instructions: {update_error}")
                 
+                # ВАЖНО: Передаем инструменты явно, чтобы агент мог их использовать
                 response = mistral_client.agents.complete(
                     agent_id=hr_agent.id,
-                    messages=valid_history
+                    messages=valid_history,
+                    tools=tools
                 )
             else:
                 logging.info("Using Chat Completion API (Mistral Large)")
@@ -402,7 +404,8 @@ async def process_ai_request(update, context, user_input, is_file=False):
                     model="mistral-large-latest",
                     messages=[
                         {"role": "system", "content": current_instructions}
-                    ] + valid_history
+                    ] + valid_history,
+                    tools=tools
                 )
             
             assistant_message = response.choices[0].message
