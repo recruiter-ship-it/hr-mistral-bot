@@ -216,6 +216,83 @@ async def disconnect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Используйте /connect для повторного подключения."
     )
 
+async def send_long_message(context, chat_id, text, parse_mode='Markdown', reply_to_message_id=None, edit_message_id=None):
+    """Отправка длинных сообщений, разбивая их на части"""
+    MAX_LENGTH = 4000
+    
+    if len(text) <= MAX_LENGTH:
+        if edit_message_id:
+            try:
+                return await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=edit_message_id,
+                    text=text,
+                    parse_mode=parse_mode,
+                    disable_web_page_preview=True
+                )
+            except Exception as e:
+                logging.warning(f"Could not edit message: {e}. Sending new instead.")
+        
+        return await context.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            parse_mode=parse_mode,
+            reply_to_message_id=reply_to_message_id,
+            disable_web_page_preview=True
+        )
+
+    # Разбиваем текст на части
+    parts = []
+    while text:
+        if len(text) <= MAX_LENGTH:
+            parts.append(text)
+            break
+        
+        # Ищем подходящее место для разрыва (конец предложения или абзаца)
+        split_at = text.rfind('\n\n', 0, MAX_LENGTH)
+        if split_at == -1:
+            split_at = text.rfind('\n', 0, MAX_LENGTH)
+        if split_at == -1:
+            split_at = text.rfind('. ', 0, MAX_LENGTH)
+        if split_at == -1:
+            split_at = MAX_LENGTH
+        
+        parts.append(text[:split_at].strip())
+        text = text[split_at:].strip()
+
+    # Отправляем части
+    first_msg = True
+    for part in parts:
+        if not part: continue
+        
+        if first_msg and edit_message_id:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=edit_message_id,
+                    text=part,
+                    parse_mode=parse_mode,
+                    disable_web_page_preview=True
+                )
+            except Exception as e:
+                logging.warning(f"Could not edit first part: {e}. Sending new instead.")
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=part,
+                    parse_mode=parse_mode,
+                    reply_to_message_id=reply_to_message_id,
+                    disable_web_page_preview=True
+                )
+            first_msg = False
+        else:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=part,
+                parse_mode=parse_mode,
+                disable_web_page_preview=True
+            )
+            await asyncio.sleep(0.1) # Небольшая задержка между сообщениями
+
 async def process_ai_request(update, context, user_input, is_file=False):
     """Обработка запроса через Chat Completion API с function calling"""
     chat_id = update.effective_chat.id
@@ -331,12 +408,12 @@ async def process_ai_request(update, context, user_input, is_file=False):
                 # Форматируем и отправляем ответ
                 formatted_response = format_markdown(assistant_content)
                 
-                await context.bot.edit_message_text(
+                await send_long_message(
+                    context=context,
                     chat_id=chat_id,
-                    message_id=message.message_id,
                     text=formatted_response,
                     parse_mode='Markdown',
-                    disable_web_page_preview=True
+                    edit_message_id=message.message_id
                 )
                 
                 return
