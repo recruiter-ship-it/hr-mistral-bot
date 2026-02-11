@@ -1,6 +1,7 @@
 import logging
 import os
 import asyncio
+import logging
 import fitz  # PyMuPDF
 from docx import Document
 import base64
@@ -454,7 +455,7 @@ if __name__ == '__main__':
     
     # Обработчики сообщений
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-    application.add_handler(MessageHandler(filters.Document.PDF, handle_document))
+    application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     
     # Запускаем notification loop в фоне
