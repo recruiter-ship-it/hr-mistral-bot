@@ -1,7 +1,6 @@
 import logging
 import os
 import asyncio
-import logging
 import fitz  # PyMuPDF
 from docx import Document
 import base64
