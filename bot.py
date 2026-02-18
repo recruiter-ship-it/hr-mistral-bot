@@ -12,6 +12,7 @@ import database as db
 import google_auth
 from google_calendar_manager import GoogleCalendarManager
 from notifications import notification_loop
+import google_sheets
 
 # Настройка логирования
 logging.basicConfig(
@@ -52,6 +53,24 @@ AGENT_INSTRUCTIONS = """
 - Ты можешь просматривать календарь пользователя и помогать планировать интервью.
 - Когда пользователь просит посмотреть календарь, используй функцию get_calendar_events.
 - Ты можешь помочь найти свободное время для встреч.
+
+5. РАБОТА С ТАБЛИЦЕЙ СОТРУДНИКОВ:
+- Ты можешь добавлять новых сотрудников в Google Таблицу.
+- Ты можешь показывать список сотрудников из таблицы.
+- Ты можешь искать сотрудников по имени.
+- Ты можешь обновлять информацию о сотрудниках.
+
+**Функции для работы с таблицей:**
+- add_employee: добавляет нового сотрудника. Параметры: employee_name (имя), role (должность), recruiter (рекрутер), start_date (дата выхода), salary (сумма), card_link (ссылка на карточку).
+- list_employees: показывает список сотрудников. Параметр: month (фильтр по месяцу, опционально).
+- search_employee: ищет сотрудника по имени. Параметр: name (имя или часть имени).
+- update_employee: обновляет данные сотрудника. Параметры: name (имя), field (поле: рекрутер, дата выхода, сумма, рекомендация, карточка), value (новое значение).
+
+**Примеры запросов:**
+- "Добавь сотрудника Иван Иванов, должность Python Developer, дата выхода 01.03.2025"
+- "Покажи список сотрудников за март"
+- "Найди сотрудника Иван"
+- "Обнови рекомендацию для Иван: прошел ИС"
 
 ФОРМАТ ОБЩЕНИЯ И СТИЛЬ:
 - Тон: Дружелюбный, профессиональный и эмпатичный. Используй обращение на "ты" для создания доверительной атмосферы.
@@ -107,6 +126,101 @@ def initialize_agent():
                             }
                         }
                     }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "add_employee",
+                        "description": "Add a new employee to the Google Sheets tracking table. Use this when user wants to add/register a new employee who is starting work.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "employee_name": {
+                                    "type": "string",
+                                    "description": "Full name of the employee"
+                                },
+                                "role": {
+                                    "type": "string",
+                                    "description": "Job title/position of the employee"
+                                },
+                                "recruiter": {
+                                    "type": "string",
+                                    "description": "Name of the recruiter who hired this person (default: '-//-')"
+                                },
+                                "start_date": {
+                                    "type": "string",
+                                    "description": "Start date in DD/MM/YYYY format (e.g., '15/03/2025')"
+                                },
+                                "salary": {
+                                    "type": "string",
+                                    "description": "Salary amount from the offer (e.g., '1500 USDT')"
+                                },
+                                "card_link": {
+                                    "type": "string",
+                                    "description": "Link to employee card/profile (optional)"
+                                }
+                            },
+                            "required": ["employee_name", "role"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "list_employees",
+                        "description": "List employees from the Google Sheets tracking table. Can filter by month.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "month": {
+                                    "type": "string",
+                                    "description": "Filter by month name in Russian (e.g., 'Март', 'Апрель'). Optional."
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "search_employee",
+                        "description": "Search for an employee by name in the Google Sheets tracking table.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "description": "Employee name or part of the name to search for"
+                                }
+                            },
+                            "required": ["name"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "update_employee",
+                        "description": "Update employee information in the Google Sheets tracking table.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "description": "Employee name to update"
+                                },
+                                "field": {
+                                    "type": "string",
+                                    "description": "Field to update: 'рекрутер', 'дата выхода', 'сумма', 'рекомендация', 'карточка'"
+                                },
+                                "value": {
+                                    "type": "string",
+                                    "description": "New value for the field"
+                                }
+                            },
+                            "required": ["name", "field", "value"]
+                        }
+                    }
                 }
             ],
             completion_args={
@@ -136,11 +250,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✅ Анализировать резюме (PDF)\n"
         "✅ Искать актуальную информацию в интернете\n"
         "✅ Помогать с рекрутингом и HR-стратегиями\n"
-        "✅ Работать с твоим Google Calendar\n\n"
-        "📅 Команды для календаря:\n"
+        "✅ Работать с твоим Google Calendar\n"
+        "✅ Вести учёт новых сотрудников в Google Таблице\n\n"
+        "📅 *Календарь:*\n"
         "/connect - подключить Google Calendar\n"
-        "/calendar - показать события\n"
-        "/disconnect - отключить календарь\n\n"
+        "/calendar - показать события\n\n"
+        "📊 *Таблица сотрудников:*\n"
+        "Просто попроси: 'Добавь сотрудника...' или 'Покажи список сотрудников'\n\n"
         "Пришли мне PDF резюме или задай вопрос!",
         parse_mode='Markdown'
     )
@@ -260,11 +376,65 @@ async def process_ai_request(update, context, user_input, is_file=False):
                     days = function_params.get('days', 7)
                     message_text, events = calendar_manager.list_events(user_id, days=days)
                     
-                    # Формируем результат для агента в формате FunctionResultEntry
                     tool_results.append({
                         "type": "function.result",
                         "tool_call_id": tool_call.id,
                         "result": message_text
+                    })
+                
+                elif function_name == "add_employee":
+                    # Добавляем сотрудника в таблицу
+                    success, message = google_sheets.add_employee(
+                        employee_name=function_params.get('employee_name', ''),
+                        role=function_params.get('role', ''),
+                        recruiter=function_params.get('recruiter', '-//-'),
+                        start_date=function_params.get('start_date'),
+                        salary=function_params.get('salary', ''),
+                        card_link=function_params.get('card_link', '')
+                    )
+                    
+                    tool_results.append({
+                        "type": "function.result",
+                        "tool_call_id": tool_call.id,
+                        "result": message
+                    })
+                
+                elif function_name == "list_employees":
+                    # Показываем список сотрудников
+                    success, message = google_sheets.list_employees(
+                        month=function_params.get('month')
+                    )
+                    
+                    tool_results.append({
+                        "type": "function.result",
+                        "tool_call_id": tool_call.id,
+                        "result": message
+                    })
+                
+                elif function_name == "search_employee":
+                    # Ищем сотрудника
+                    success, message = google_sheets.search_employee(
+                        name=function_params.get('name', '')
+                    )
+                    
+                    tool_results.append({
+                        "type": "function.result",
+                        "tool_call_id": tool_call.id,
+                        "result": message
+                    })
+                
+                elif function_name == "update_employee":
+                    # Обновляем данные сотрудника
+                    success, message = google_sheets.update_employee(
+                        name=function_params.get('name', ''),
+                        field=function_params.get('field', ''),
+                        value=function_params.get('value', '')
+                    )
+                    
+                    tool_results.append({
+                        "type": "function.result",
+                        "tool_call_id": tool_call.id,
+                        "result": message
                     })
             
             # Отправляем результаты tool calls обратно в агента
@@ -461,5 +631,5 @@ if __name__ == '__main__':
     loop = asyncio.get_event_loop()
     loop.create_task(notification_loop(application.bot))
     
-    logging.info("Бот запущен с Agents API, веб-поиском, Google Calendar и уведомлениями...")
+    logging.info("Бот запущен с Agents API, веб-поиском, Google Calendar, Google Sheets и уведомлениями...")
     application.run_polling()
