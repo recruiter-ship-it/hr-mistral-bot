@@ -19,9 +19,9 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# API Ключи
-MISTRAL_API_KEY = "WOkX5dBJuq8I9sMkVqmlpNwjVrzX19i3"
-TELEGRAM_BOT_TOKEN = "8399347076:AAFLtRxXEKESWuTQb19vc6mhMQph7rHxsLg"
+# API Ключи - используются переменные окружения или значения по умолчанию
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "AEE3rpaceKHZzBtbVKnN9CWoNdpjlp2l")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8399347076:AAFLtRxXEKESWuTQb19vc6mhMQph7rHxsLg")
 
 # Системный промпт для агента
 AGENT_INSTRUCTIONS = """
