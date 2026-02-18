@@ -48,12 +48,19 @@ def get_sheets_service():
         else:
             creds_dict = creds_json
         
+        # Убеждаемся, что private_key правильно отформатирован
+        # Google отправляет \n как escape-последовательность в JSON
+        if 'private_key' in creds_dict and isinstance(creds_dict['private_key'], str):
+            # Заменяем экранированные \n на реальные переносы строк
+            creds_dict['private_key'] = creds_dict['private_key'].replace('\\n', '\n')
+        
         credentials = service_account.Credentials.from_service_account_info(
             creds_dict, 
             scopes=SCOPES
         )
         
         service = build('sheets', 'v4', credentials=credentials)
+        logger.info("Google Sheets service created successfully")
         return service
         
     except Exception as e:
