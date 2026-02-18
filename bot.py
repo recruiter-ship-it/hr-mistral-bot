@@ -358,8 +358,9 @@ async def process_ai_request(update, context, user_input, is_file=False):
         # Сохраняем conversation_id для следующих сообщений
         user_conversations[chat_id] = response.conversation_id
         
-        # Обработка tool calls (если агент хочет вызвать функцию)
-        tool_calls = [out for out in response.outputs if out.type == 'tool.call']
+        # Обработка function calls (если агент хочет вызвать функцию)
+        # Mistral возвращает 'function.call', не 'tool.call'
+        tool_calls = [out for out in response.outputs if out.type == 'function.call']
         
         if tool_calls:
             # Обрабатываем каждый tool call
@@ -378,7 +379,7 @@ async def process_ai_request(update, context, user_input, is_file=False):
                     
                     tool_results.append({
                         "type": "function.result",
-                        "tool_call_id": tool_call.id,
+                        "tool_call_id": tool_call.tool_call_id,
                         "result": message_text
                     })
                 
@@ -395,7 +396,7 @@ async def process_ai_request(update, context, user_input, is_file=False):
                     
                     tool_results.append({
                         "type": "function.result",
-                        "tool_call_id": tool_call.id,
+                        "tool_call_id": tool_call.tool_call_id,
                         "result": message
                     })
                 
@@ -407,7 +408,7 @@ async def process_ai_request(update, context, user_input, is_file=False):
                     
                     tool_results.append({
                         "type": "function.result",
-                        "tool_call_id": tool_call.id,
+                        "tool_call_id": tool_call.tool_call_id,
                         "result": message
                     })
                 
@@ -419,7 +420,7 @@ async def process_ai_request(update, context, user_input, is_file=False):
                     
                     tool_results.append({
                         "type": "function.result",
-                        "tool_call_id": tool_call.id,
+                        "tool_call_id": tool_call.tool_call_id,
                         "result": message
                     })
                 
@@ -433,7 +434,7 @@ async def process_ai_request(update, context, user_input, is_file=False):
                     
                     tool_results.append({
                         "type": "function.result",
-                        "tool_call_id": tool_call.id,
+                        "tool_call_id": tool_call.tool_call_id,
                         "result": message
                     })
             
