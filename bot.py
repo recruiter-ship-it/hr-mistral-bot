@@ -1,6 +1,7 @@
 import logging
 import os
 import asyncio
+import json
 import fitz  # PyMuPDF
 from docx import Document
 import base64
@@ -368,7 +369,13 @@ async def process_ai_request(update, context, user_input, is_file=False):
             
             for tool_call in tool_calls:
                 function_name = tool_call.name
-                function_params = tool_call.arguments if hasattr(tool_call, 'arguments') else {}
+                
+                # Arguments может быть строкой JSON или словарём
+                raw_args = tool_call.arguments if hasattr(tool_call, 'arguments') else {}
+                if isinstance(raw_args, str):
+                    function_params = json.loads(raw_args)
+                else:
+                    function_params = raw_args if raw_args else {}
                 
                 logging.info(f"Tool call: {function_name} with params: {function_params}")
                 
