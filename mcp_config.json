@@ -1,39 +1,445 @@
 {
   "mcpServers": [
     {
-      "name": "filesystem",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+      "name": "google-workspace",
+      "description": "Полный Google Workspace: Gmail, Calendar, Drive, Docs, Sheets, Slides, Forms, Tasks, Contacts, Chat",
+      "command": "uvx",
+      "args": ["google-workspace-mcp"],
       "transport": "stdio",
-      "enabled": false,
-      "env": {}
-    },
-    {
-      "name": "github",
-      "command": "npx", 
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "transport": "stdio",
-      "enabled": false,
+      "enabled": true,
       "env": {
-        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "GOOGLE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}"
       }
     },
     {
-      "name": "postgres",
+      "name": "google-all",
+      "description": "Google APIs: Calendar, Drive, Gmail, Sheets, Docs в одном сервере",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-postgres"],
-      "transport": "stdio", 
-      "enabled": false,
+      "args": ["-y", "@ngs/google-mcp-server"],
+      "transport": "stdio",
+      "enabled": true,
       "env": {
-        "DATABASE_URL": "${DATABASE_URL}"
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "GOOGLE_REDIRECT_URI": "http://localhost",
+        "GOOGLE_ACCESS_TOKEN": "${GOOGLE_ACCESS_TOKEN}",
+        "GOOGLE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}"
       }
     },
     {
-      "name": "office",
-      "url": "http://localhost:3001",
-      "transport": "http",
-      "enabled": false
+      "name": "google-sheets",
+      "description": "Google Sheets: чтение, запись, создание таблиц",
+      "command": "npx",
+      "args": ["-y", "mcp-google-sheets"],
+      "transport": "stdio",
+      "enabled": true,
+      "env": {
+        "GOOGLE_SERVICE_ACCOUNT_KEY": "${GOOGLE_SERVICE_ACCOUNT_B64}"
+      }
+    },
+    {
+      "name": "google-calendar",
+      "description": "Google Calendar: события, расписание, встречи",
+      "command": "npx",
+      "args": ["-y", "@eliasuran/google-calendar-mcp"],
+      "transport": "stdio",
+      "enabled": true,
+      "env": {
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "GOOGLE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}"
+      }
+    },
+    {
+      "name": "google-drive",
+      "description": "Google Drive: файлы, папки, поиск, шаринг",
+      "command": "npx",
+      "args": ["-y", "@wong2/google-drive-mcp"],
+      "transport": "stdio",
+      "enabled": true,
+      "env": {
+        "GOOGLE_SERVICE_ACCOUNT_KEY": "${GOOGLE_SERVICE_ACCOUNT_B64}"
+      }
+    },
+    {
+      "name": "gmail",
+      "description": "Gmail: чтение, отправка, поиск писем",
+      "command": "npx",
+      "args": ["-y", "@gongrzhe/gmail-mcp-server"],
+      "transport": "stdio",
+      "enabled": true,
+      "env": {
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "GOOGLE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}"
+      }
+    },
+    {
+      "name": "google-maps",
+      "description": "Google Maps: геокодинг, поиск мест, маршруты",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-google-maps"],
+      "transport": "stdio",
+      "enabled": true,
+      "env": {
+        "GOOGLE_MAPS_API_KEY": "${GOOGLE_MAPS_API_KEY}"
+      }
+    },
+    {
+      "name": "google-search-console",
+      "description": "Google Search Console: аналитика поиска",
+      "command": "npx",
+      "args": ["-y", "google-search-console-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "GOOGLE_SERVICE_ACCOUNT_KEY": "${GOOGLE_SERVICE_ACCOUNT_B64}"
+      }
+    },
+    {
+      "name": "google-analytics",
+      "description": "Google Analytics: отчёты, метрики",
+      "command": "npx",
+      "args": ["-y", "google-analytics-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "GOOGLE_SERVICE_ACCOUNT_KEY": "${GOOGLE_SERVICE_ACCOUNT_B64}"
+      }
+    },
+    {
+      "name": "youtube",
+      "description": "YouTube: видео, плейлисты, комментарии",
+      "command": "npx",
+      "args": ["-y", "youtube-mcp-server"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "YOUTUBE_API_KEY": "${YOUTUBE_API_KEY}"
+      }
+    },
+    {
+      "name": "google-tasks",
+      "description": "Google Tasks: задачи, списки",
+      "command": "npx",
+      "args": ["-y", "google-tasks-mcp"],
+      "transport": "stdio",
+      "enabled": true,
+      "env": {
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "GOOGLE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}"
+      }
+    },
+    {
+      "name": "google-contacts",
+      "description": "Google Contacts: контакты, поиск",
+      "command": "npx",
+      "args": ["-y", "google-contacts-mcp"],
+      "transport": "stdio",
+      "enabled": true,
+      "env": {
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "GOOGLE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}"
+      }
+    },
+    {
+      "name": "google-docs",
+      "description": "Google Docs: создание, редактирование документов",
+      "command": "npx",
+      "args": ["-y", "@wong2/google-docs-mcp"],
+      "transport": "stdio",
+      "enabled": true,
+      "env": {
+        "GOOGLE_SERVICE_ACCOUNT_KEY": "${GOOGLE_SERVICE_ACCOUNT_B64}"
+      }
+    },
+    {
+      "name": "google-slides",
+      "description": "Google Slides: презентации",
+      "command": "npx",
+      "args": ["-y", "google-slides-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "GOOGLE_SERVICE_ACCOUNT_KEY": "${GOOGLE_SERVICE_ACCOUNT_B64}"
+      }
+    },
+    {
+      "name": "google-forms",
+      "description": "Google Forms: опросы, формы",
+      "command": "npx",
+      "args": ["-y", "google-forms-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "GOOGLE_SERVICE_ACCOUNT_KEY": "${GOOGLE_SERVICE_ACCOUNT_B64}"
+      }
+    },
+    {
+      "name": "google-meet",
+      "description": "Google Meet: создание встреч, ссылки",
+      "command": "npx",
+      "args": ["-y", "google-meet-mcp"],
+      "transport": "stdio",
+      "enabled": true,
+      "env": {
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "GOOGLE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}"
+      }
+    },
+    {
+      "name": "google-bigquery",
+      "description": "Google BigQuery: SQL запросы к данным, аналитика",
+      "command": "npx",
+      "args": ["-y", "@datastax/bigquery-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "GOOGLE_APPLICATION_CREDENTIALS": "${GOOGLE_APPLICATION_CREDENTIALS_PATH}",
+        "GOOGLE_CLOUD_PROJECT": "${GOOGLE_CLOUD_PROJECT}"
+      }
+    },
+    {
+      "name": "google-cloud-storage",
+      "description": "Google Cloud Storage: хранение файлов, бакеты",
+      "command": "npx",
+      "args": ["-y", "gcs-mcp-server"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "GOOGLE_APPLICATION_CREDENTIALS": "${GOOGLE_APPLICATION_CREDENTIALS_PATH}",
+        "GOOGLE_CLOUD_PROJECT": "${GOOGLE_CLOUD_PROJECT}"
+      }
+    },
+    {
+      "name": "google-translate",
+      "description": "Google Translate: перевод текста на разные языки",
+      "command": "npx",
+      "args": ["-y", "google-translate-mcp"],
+      "transport": "stdio",
+      "enabled": true,
+      "env": {
+        "GOOGLE_API_KEY": "${GOOGLE_API_KEY}"
+      }
+    },
+    {
+      "name": "google-chat",
+      "description": "Google Chat: сообщения, пространства",
+      "command": "npx",
+      "args": ["-y", "google-chat-mcp"],
+      "transport": "stdio",
+      "enabled": true,
+      "env": {
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "GOOGLE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}"
+      }
+    },
+    {
+      "name": "google-keep",
+      "description": "Google Keep: заметки, списки",
+      "command": "npx",
+      "args": ["-y", "google-keep-mcp"],
+      "transport": "stdio",
+      "enabled": true,
+      "env": {
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "GOOGLE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}"
+      }
+    },
+    {
+      "name": "google-ads",
+      "description": "Google Ads: рекламные кампании, отчёты",
+      "command": "npx",
+      "args": ["-y", "google-ads-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "GOOGLE_DEVELOPER_TOKEN": "${GOOGLE_DEVELOPER_TOKEN}",
+        "GOOGLE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}"
+      }
+    },
+    {
+      "name": "google-looker",
+      "description": "Google Looker: бизнес-аналитика, дашборды",
+      "command": "npx",
+      "args": ["-y", "looker-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "LOOKER_API_URL": "${LOOKER_API_URL}",
+        "LOOKER_CLIENT_ID": "${LOOKER_CLIENT_ID}",
+        "LOOKER_CLIENT_SECRET": "${LOOKER_CLIENT_SECRET}"
+      }
+    },
+    {
+      "name": "google-firebase",
+      "description": "Google Firebase: база данных, аутентификация",
+      "command": "npx",
+      "args": ["-y", "firebase-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "FIREBASE_PROJECT_ID": "${FIREBASE_PROJECT_ID}",
+        "FIREBASE_SERVICE_ACCOUNT": "${GOOGLE_SERVICE_ACCOUNT_B64}"
+      }
+    },
+    {
+      "name": "google-pubsub",
+      "description": "Google Pub/Sub: очереди сообщений, событийная архитектура",
+      "command": "npx",
+      "args": ["-y", "gcp-pubsub-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "GOOGLE_APPLICATION_CREDENTIALS": "${GOOGLE_APPLICATION_CREDENTIALS_PATH}",
+        "GOOGLE_CLOUD_PROJECT": "${GOOGLE_CLOUD_PROJECT}"
+      }
+    },
+    {
+      "name": "google-secret-manager",
+      "description": "Google Secret Manager: хранение секретов",
+      "command": "npx",
+      "args": ["-y", "gcp-secret-manager-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "GOOGLE_APPLICATION_CREDENTIALS": "${GOOGLE_APPLICATION_CREDENTIALS_PATH}",
+        "GOOGLE_CLOUD_PROJECT": "${GOOGLE_CLOUD_PROJECT}"
+      }
+    },
+    {
+      "name": "google-vision",
+      "description": "Google Vision API: распознавание изображений, OCR",
+      "command": "npx",
+      "args": ["-y", "google-vision-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "GOOGLE_API_KEY": "${GOOGLE_API_KEY}"
+      }
+    },
+    {
+      "name": "google-speech",
+      "description": "Google Speech-to-Text и Text-to-Speech",
+      "command": "npx",
+      "args": ["-y", "google-speech-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "GOOGLE_APPLICATION_CREDENTIALS": "${GOOGLE_APPLICATION_CREDENTIALS_PATH}",
+        "GOOGLE_CLOUD_PROJECT": "${GOOGLE_CLOUD_PROJECT}"
+      }
+    },
+    {
+      "name": "google-natural-language",
+      "description": "Google Natural Language API: NLP, анализ текста",
+      "command": "npx",
+      "args": ["-y", "google-nlp-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "GOOGLE_API_KEY": "${GOOGLE_API_KEY}"
+      }
+    },
+    {
+      "name": "youtube-data-api",
+      "description": "YouTube Data API v3: расширенное управление YouTube",
+      "command": "npx",
+      "args": ["-y", "@h1de0v/youtube-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "YOUTUBE_API_KEY": "${YOUTUBE_API_KEY}",
+        "YOUTUBE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "YOUTUBE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "YOUTUBE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}"
+      }
+    },
+    {
+      "name": "google-fit",
+      "description": "Google Fit: данные о здоровье и фитнесе",
+      "command": "npx",
+      "args": ["-y", "google-fit-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "GOOGLE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}"
+      }
+    },
+    {
+      "name": "google-photos",
+      "description": "Google Photos: фото, альбомы, поиск",
+      "command": "npx",
+      "args": ["-y", "google-photos-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "GOOGLE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}"
+      }
+    },
+    {
+      "name": "google-news",
+      "description": "Google News: поиск новостей",
+      "command": "npx",
+      "args": ["-y", "google-news-mcp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "GOOGLE_API_KEY": "${GOOGLE_API_KEY}"
+      }
     }
   ],
-  "_comment": "Enable servers by setting 'enabled' to true and configuring env variables"
+  "_instructions": {
+    "required_secrets": {
+      "GOOGLE_CLIENT_ID": "OAuth Client ID from Google Cloud Console",
+      "GOOGLE_CLIENT_SECRET": "OAuth Client Secret from Google Cloud Console",
+      "GOOGLE_REFRESH_TOKEN": "Obtained via OAuth flow",
+      "GOOGLE_SERVICE_ACCOUNT_B64": "Service Account JSON encoded in base64",
+      "GOOGLE_MAPS_API_KEY": "Google Maps API key",
+      "GOOGLE_API_KEY": "General Google API key (for Translate, Vision, etc.)",
+      "GOOGLE_ACCESS_TOKEN": "Optional, obtained via OAuth",
+      "GOOGLE_APPLICATION_CREDENTIALS_PATH": "Path to Service Account JSON file",
+      "GOOGLE_CLOUD_PROJECT": "Google Cloud Project ID",
+      "GOOGLE_DEVELOPER_TOKEN": "Google Ads Developer Token",
+      "YOUTUBE_API_KEY": "YouTube Data API key",
+      "LOOKER_API_URL": "Looker instance URL",
+      "LOOKER_CLIENT_ID": "Looker OAuth Client ID",
+      "LOOKER_CLIENT_SECRET": "Looker OAuth Client Secret",
+      "FIREBASE_PROJECT_ID": "Firebase Project ID"
+    },
+    "setup_steps": [
+      "1. Go to Google Cloud Console: https://console.cloud.google.com",
+      "2. Create OAuth 2.0 Credentials (Client ID & Secret)",
+      "3. Enable APIs: Sheets, Drive, Calendar, Gmail, Docs, etc.",
+      "4. For Service Account: Create SA, download JSON, encode to base64",
+      "5. Add secrets to GitHub repository secrets or .env file"
+    ],
+    "encoding_service_account": "base64 -i credentials.json | tr -d '\\n'",
+    "oauth_flow": "Use OAuth playground or custom script to get refresh token",
+    "api_enable_links": {
+      "sheets": "https://console.cloud.google.com/apis/library/sheets.googleapis.com",
+      "drive": "https://console.cloud.google.com/apis/library/drive.googleapis.com",
+      "calendar": "https://console.cloud.google.com/apis/library/calendar-json.googleapis.com",
+      "gmail": "https://console.cloud.google.com/apis/library/gmail.googleapis.com",
+      "docs": "https://console.cloud.google.com/apis/library/docs.googleapis.com",
+      "maps": "https://console.cloud.google.com/apis/library/maps-backend.googleapis.com",
+      "youtube": "https://console.cloud.google.com/apis/library/youtube.googleapis.com",
+      "bigquery": "https://console.cloud.google.com/apis/library/bigquery.googleapis.com",
+      "translate": "https://console.cloud.google.com/apis/library/translate.googleapis.com",
+      "vision": "https://console.cloud.google.com/apis/library/vision.googleapis.com"
+    }
+  }
 }

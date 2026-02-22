@@ -72,6 +72,7 @@ class MCPPrompt:
 class MCPServerConfig:
     """Конфигурация MCP сервера"""
     name: str
+    description: str = ""
     command: str = ""  # Для stdio
     args: List[str] = field(default_factory=list)
     url: str = ""  # Для HTTP/WebSocket
@@ -82,6 +83,7 @@ class MCPServerConfig:
     def to_dict(self) -> Dict:
         return {
             "name": self.name,
+            "description": self.description,
             "command": self.command,
             "args": self.args,
             "url": self.url,
@@ -92,13 +94,25 @@ class MCPServerConfig:
     
     @classmethod
     def from_dict(cls, data: Dict) -> 'MCPServerConfig':
+        # Подставляем реальные значения env переменных
+        env = data.get("env", {})
+        resolved_env = {}
+        for key, value in env.items():
+            if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+                # Извлекаем имя переменной из ${VAR_NAME}
+                var_name = value[2:-1]
+                resolved_env[key] = os.environ.get(var_name, "")
+            else:
+                resolved_env[key] = value
+        
         return cls(
             name=data["name"],
+            description=data.get("description", ""),
             command=data.get("command", ""),
             args=data.get("args", []),
             url=data.get("url", ""),
             transport=MCPTransport(data.get("transport", "stdio")),
-            env=data.get("env", {}),
+            env=resolved_env,
             enabled=data.get("enabled", True)
         )
 
@@ -967,15 +981,33 @@ class MCPOrchestrator:
     """
     Оркестратор MCP - объединяет внешние и локальные серверы
     Это главный класс для управления всеми навыками агента
+    
+    Навыки (как в OpenClaw):
+    - filesystem: работа с файлами
+    - terminal: выполнение команд
+    - browser: веб-автоматизация
+    - memory: персистентная память
+    - communication: Slack, Discord, Email
+    - image: генерация изображений
+    - database: SQL операции
+    - analytics: отчёты и графики
+    - documents: создание документов
+    - hr: HR документы
+    - google: Google Workspace
+    - web: веб-запросы
     """
     
     def __init__(self):
         self.client_manager = MCPClientManager()
         self.local_servers: Dict[str, LocalMCPServer] = {}
-        self.tool_to_server: Dict[str, tuple] = {}  # tool_name -> (server_name, is_local)
+        self.extended_skills = None  # Новые расширенные навыки
+        self.tool_to_server: Dict[str, tuple] = {}  # tool_name -> (server_name, is_local, is_extended)
         
         # Инициализируем локальные серверы
         self._init_local_servers()
+        
+        # Инициализируем расширенные навыки (как в OpenClaw)
+        self._init_extended_skills()
     
     def _init_local_servers(self):
         """Инициализация встроенных MCP серверов"""
@@ -991,9 +1023,26 @@ class MCPOrchestrator:
             self.local_servers[name] = server
             # Маппинг инструментов
             for tool in server.get_tools():
-                self.tool_to_server[tool.name] = (name, True)
+                self.tool_to_server[tool.name] = (name, True, False)
         
         logger.info(f"Initialized {len(self.local_servers)} local MCP servers")
+    
+    def _init_extended_skills(self):
+        """Инициализация расширенных навыков (как в OpenClaw)"""
+        try:
+            from skills_extended import skills_registry
+            
+            self.extended_skills = skills_registry
+            
+            # Добавляем инструменты в маппинг
+            for skill_name, skill in skills_registry.skills.items():
+                for tool in skill.tools:
+                    self.tool_to_server[tool.name] = (skill_name, False, True)
+            
+            logger.info(f"Initialized {len(skills_registry.skills)} extended skills with {len(skills_registry.get_all_tools())} tools")
+        except ImportError as e:
+            logger.warning(f"Extended skills not available: {e}")
+            self.extended_skills = None
     
     async def initialize(self):
         """Полная инициализация"""
@@ -1004,7 +1053,7 @@ class MCPOrchestrator:
         # Добавляем инструменты внешних серверов в маппинг
         for server_name, connection in self.client_manager.servers.items():
             for tool in connection.tools:
-                self.tool_to_server[tool.name] = (server_name, False)
+                self.tool_to_server[tool.name] = (server_name, False, False)
     
     def get_all_tools(self) -> List[Dict]:
         """Получение всех инструментов для Mistral"""
@@ -1014,6 +1063,10 @@ class MCPOrchestrator:
         for server in self.local_servers.values():
             for tool in server.get_tools():
                 tools.append(tool.to_mistral_tool())
+        
+        # Расширенные навыки (как в OpenClaw)
+        if self.extended_skills:
+            tools.extend(self.extended_skills.get_all_tools())
         
         # Внешние серверы
         tools.extend(self.client_manager.get_all_tools())
@@ -1029,9 +1082,13 @@ class MCPOrchestrator:
         if tool_name not in self.tool_to_server:
             return {"error": f"Tool {tool_name} not found"}
         
-        server_name, is_local = self.tool_to_server[tool_name]
+        server_name, is_local, is_extended = self.tool_to_server[tool_name]
         
-        if is_local:
+        if is_extended:
+            # Расширенный навык (как в OpenClaw)
+            if self.extended_skills:
+                return await self.extended_skills.execute_tool(tool_name, **arguments)
+        elif is_local:
             # Локальный сервер
             server = self.local_servers.get(server_name)
             if server:
@@ -1055,6 +1112,18 @@ class MCPOrchestrator:
                 "tools_count": len(server.tools),
                 "enabled": True
             })
+        
+        # Расширенные навыки (как в OpenClaw)
+        if self.extended_skills:
+            for skill_info in self.extended_skills.list_skills():
+                skills.append({
+                    "name": skill_info["name"],
+                    "description": skill_info["description"],
+                    "type": "extended",
+                    "tools_count": skill_info["tools_count"],
+                    "tools": skill_info["tools"],
+                    "enabled": True
+                })
         
         # Внешние
         for name, conn in self.client_manager.servers.items():

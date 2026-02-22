@@ -9,6 +9,7 @@ import base64
 import logging
 from datetime import datetime, timedelta
 from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -21,51 +22,246 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
 logger = logging.getLogger(__name__)
 
+# Глобальный кэш сервиса
+_sheets_service_cache = None
+
+
+def _parse_private_key(key: str) -> str:
+    """
+    Правильно форматирует private key из разных форматов.
+    
+    Google Service Account выдаёт ключ в формате:
+    -----BEGIN PRIVATE KEY-----\nMIIE...base64...\n-----END PRIVATE KEY-----\n
+    
+    Но при передаче через env переменные или JSON переносы строк могут быть
+    экранированы как \\n или как реальные \n
+    """
+    if not key:
+        return key
+    
+    # Если ключ уже правильно отформатирован (содержит реальные переносы)
+    if '-----BEGIN' in key and '\n' in key and '-----END' in key:
+        # Убеждаемся что переносы строк правильные
+        # Иногда бывает смесь \\n и \n
+        result = key.replace('\\n', '\n')
+        # Убираем возможные двойные переносы
+        while '\n\n' in result:
+            result = result.replace('\n\n', '\n')
+        return result
+    
+    # Если ключ содержит экранированные переносы
+    if '\\n' in key:
+        result = key.replace('\\n', '\n')
+        while '\n\n' in result:
+            result = result.replace('\n\n', '\n')
+        return result
+    
+    # Если ключ без маркеров BEGIN/END - это может быть raw base64
+    # (маловероятно, но обработаем)
+    if '-----BEGIN' not in key:
+        # Оборачиваем в PKCS#8 формат
+        logger.warning("Private key missing BEGIN/END markers, attempting to wrap")
+        return f"-----BEGIN PRIVATE KEY-----\n{key}\n-----END PRIVATE KEY-----\n"
+    
+    return key
+
+
+def _get_credentials_from_env() -> service_account.Credentials:
+    """
+    Получает credentials из переменных окружения.
+    Поддерживает несколько форматов:
+    - GOOGLE_SERVICE_ACCOUNT_B64: base64-encoded JSON
+    - GOOGLE_SERVICE_ACCOUNT: JSON строка
+    - GOOGLE_APPLICATION_CREDENTIALS: путь к файлу
+    """
+    global _sheets_service_cache
+    
+    # Пробуем разные источники credentials
+    creds_dict = None
+    source = None
+    
+    # 1. Base64-encoded JSON (рекомендуется для продакшена)
+    creds_b64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_B64")
+    if creds_b64:
+        try:
+            creds_json = base64.b64decode(creds_b64).decode('utf-8')
+            creds_dict = json.loads(creds_json)
+            source = "GOOGLE_SERVICE_ACCOUNT_B64"
+            logger.info("Loaded credentials from GOOGLE_SERVICE_ACCOUNT_B64")
+        except Exception as e:
+            logger.error(f"Failed to decode GOOGLE_SERVICE_ACCOUNT_B64: {e}")
+    
+    # 2. JSON строка напрямую
+    if not creds_dict:
+        creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT")
+        if creds_json:
+            try:
+                if isinstance(creds_json, str):
+                    creds_dict = json.loads(creds_json)
+                else:
+                    creds_dict = creds_json
+                source = "GOOGLE_SERVICE_ACCOUNT"
+                logger.info("Loaded credentials from GOOGLE_SERVICE_ACCOUNT")
+            except Exception as e:
+                logger.error(f"Failed to parse GOOGLE_SERVICE_ACCOUNT: {e}")
+    
+    # 3. Путь к файлу credentials
+    if not creds_dict:
+        creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        if creds_path:
+            try:
+                with open(creds_path, 'r') as f:
+                    creds_dict = json.load(f)
+                source = f"GOOGLE_APPLICATION_CREDENTIALS ({creds_path})"
+                logger.info(f"Loaded credentials from file: {creds_path}")
+            except Exception as e:
+                logger.error(f"Failed to load credentials file: {e}")
+    
+    if not creds_dict:
+        logger.warning("No Service Account credentials found in environment")
+        logger.info("Set one of: GOOGLE_SERVICE_ACCOUNT_B64, GOOGLE_SERVICE_ACCOUNT, or GOOGLE_APPLICATION_CREDENTIALS")
+        return None
+    
+    # Проверяем обязательные поля
+    required_fields = ['type', 'project_id', 'private_key_id', 'private_key', 'client_email']
+    missing_fields = [f for f in required_fields if f not in creds_dict]
+    if missing_fields:
+        logger.error(f"Service Account JSON missing required fields: {missing_fields}")
+        return None
+    
+    # Форматируем private_key
+    if 'private_key' in creds_dict:
+        original_key = creds_dict['private_key']
+        creds_dict['private_key'] = _parse_private_key(original_key)
+        
+        # Логируем для отладки (без самого ключа!)
+        key_preview = creds_dict['private_key'][:50] + "..." if creds_dict['private_key'] else "None"
+        logger.debug(f"Private key formatted: {key_preview}")
+    
+    try:
+        credentials = service_account.Credentials.from_service_account_info(
+            creds_dict, 
+            scopes=SCOPES
+        )
+        logger.info(f"Successfully created credentials from {source}")
+        return credentials
+    except Exception as e:
+        logger.error(f"Failed to create credentials: {e}")
+        
+        # Дополнительная диагностика
+        if 'private_key' in creds_dict:
+            key = creds_dict['private_key']
+            if '-----BEGIN' not in key:
+                logger.error("Private key missing BEGIN marker")
+            if '-----END' not in key:
+                logger.error("Private key missing END marker")
+        
+        return None
+
 
 def get_sheets_service():
     """
     Создаёт сервис Google Sheets используя Service Account.
     
-    Требуется переменная окружения GOOGLE_SERVICE_ACCOUNT с JSON credentials,
-    либо GOOGLE_SERVICE_ACCOUNT_B64 с base64-encoded JSON.
+    Требуется одна из переменных окружения:
+    - GOOGLE_SERVICE_ACCOUNT_B64: base64-encoded JSON credentials
+    - GOOGLE_SERVICE_ACCOUNT: JSON credentials строкой
+    - GOOGLE_APPLICATION_CREDENTIALS: путь к файлу credentials
+    
+    Returns:
+        Google Sheets service object or None
     """
+    global _sheets_service_cache
+    
+    # Возвращаем закэшированный сервис
+    if _sheets_service_cache is not None:
+        return _sheets_service_cache
+    
     try:
-        # Пробуем получить credentials из переменной окружения
-        creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT")
-        creds_b64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_B64")
-        
-        if creds_b64:
-            # Декодируем из base64
-            creds_json = base64.b64decode(creds_b64).decode('utf-8')
-        
-        if not creds_json:
-            logger.warning("Google Service Account credentials not found")
+        credentials = _get_credentials_from_env()
+        if not credentials:
             return None
         
-        # Парсим JSON
-        if isinstance(creds_json, str):
-            creds_dict = json.loads(creds_json)
-        else:
-            creds_dict = creds_json
-        
-        # Убеждаемся, что private_key правильно отформатирован
-        # Google отправляет \n как escape-последовательность в JSON
-        if 'private_key' in creds_dict and isinstance(creds_dict['private_key'], str):
-            # Заменяем экранированные \n на реальные переносы строк
-            creds_dict['private_key'] = creds_dict['private_key'].replace('\\n', '\n')
-        
-        credentials = service_account.Credentials.from_service_account_info(
-            creds_dict, 
-            scopes=SCOPES
-        )
-        
         service = build('sheets', 'v4', credentials=credentials)
+        _sheets_service_cache = service
         logger.info("Google Sheets service created successfully")
         return service
         
     except Exception as e:
         logger.error(f"Failed to create Sheets service: {e}")
         return None
+
+
+def test_sheets_connection() -> dict:
+    """
+    Тестирует подключение к Google Sheets.
+    Полезно для диагностики проблем.
+    
+    Returns:
+        Dict с результатами теста
+    """
+    result = {
+        "success": False,
+        "credentials_found": False,
+        "service_created": False,
+        "sheet_accessible": False,
+        "error": None,
+        "details": []
+    }
+    
+    # 1. Проверяем credentials
+    creds_b64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_B64")
+    creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT")
+    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    
+    if creds_b64:
+        result["details"].append("Found GOOGLE_SERVICE_ACCOUNT_B64")
+        result["credentials_found"] = True
+    elif creds_json:
+        result["details"].append("Found GOOGLE_SERVICE_ACCOUNT")
+        result["credentials_found"] = True
+    elif creds_path:
+        result["details"].append(f"Found GOOGLE_APPLICATION_CREDENTIALS: {creds_path}")
+        result["credentials_found"] = True
+    else:
+        result["error"] = "No credentials found in environment"
+        result["details"].append("Set one of: GOOGLE_SERVICE_ACCOUNT_B64, GOOGLE_SERVICE_ACCOUNT, GOOGLE_APPLICATION_CREDENTIALS")
+        return result
+    
+    # 2. Проверяем создание сервиса
+    service = get_sheets_service()
+    if not service:
+        result["error"] = "Failed to create Sheets service"
+        return result
+    result["service_created"] = True
+    result["details"].append("Sheets service created successfully")
+    
+    # 3. Проверяем доступ к таблице
+    try:
+        sheet_metadata = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
+        result["sheet_accessible"] = True
+        result["details"].append(f"Spreadsheet accessible: {sheet_metadata.get('properties', {}).get('title', 'Unknown')}")
+        
+        # Пробуем прочитать первую ячейку
+        test_result = service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"{SHEET_NAME}!A1"
+        ).execute()
+        result["details"].append(f"Read test successful: {test_result.get('values', [[]])[0] if test_result.get('values') else 'empty'}")
+        
+        result["success"] = True
+        
+    except HttpError as e:
+        result["error"] = f"HTTP Error: {e.reason}"
+        result["details"].append(f"Error code: {e.status_code}")
+        if e.status_code == 403:
+            result["details"].append("PERMISSION DENIED: Share the spreadsheet with your Service Account email")
+        elif e.status_code == 404:
+            result["details"].append(f"Spreadsheet not found: {SPREADSHEET_ID}")
+    except Exception as e:
+        result["error"] = f"Unexpected error: {str(e)}"
+    
+    return result
 
 
 def get_sheet_data(range_name: str = "A:K") -> tuple:
@@ -123,7 +319,7 @@ def add_employee(
     """
     service = get_sheets_service()
     if not service:
-        return False, "❌ Google Sheets не настроен. Обратитесь к администратору."
+        return False, "❌ Google Sheets не настроен. Выполните: python setup_google_env.py"
     
     try:
         # Получаем текущие данные для определения следующего номера
@@ -134,7 +330,7 @@ def add_employee(
         # Находим последний заполненный номер
         last_number = 0
         for row in data[1:]:  # Пропускаем заголовок
-            if row and row[0].isdigit():
+            if row and len(row) > 0 and str(row[0]).isdigit():
                 last_number = max(last_number, int(row[0]))
         
         next_number = last_number + 1
@@ -149,13 +345,15 @@ def add_employee(
         if start_date:
             try:
                 # Пробуем разные форматы
-                for fmt in ["%d/%m/%Y", "%d.%m.%Y", "%Y-%m-%d"]:
+                parsed_date = None
+                for fmt in ["%d/%m/%Y", "%d.%m.%Y", "%Y-%m-%d", "%d-%m-%Y"]:
                     try:
                         parsed_date = datetime.strptime(start_date, fmt)
                         break
                     except ValueError:
                         continue
-                else:
+                
+                if not parsed_date:
                     # Если не распарсилось, используем сегодня
                     parsed_date = datetime.now()
                 
@@ -234,7 +432,11 @@ def add_employee(
         
     except HttpError as e:
         logger.error(f"Sheets API error: {e}")
-        return False, f"❌ Ошибка при добавлении: {e.reason}"
+        error_msg = f"❌ Ошибка при добавлении: {e.reason}"
+        if e.status_code == 403:
+            error_msg += "\n\n⚠️ У Service Account нет доступа к таблице."
+            error_msg += "\nПоделитесь таблицей с email из credentials (client_email field)."
+        return False, error_msg
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
         return False, f"❌ Ошибка: {str(e)}"
@@ -513,3 +715,32 @@ def update_employee(name: str, field: str, value: str) -> tuple:
     except Exception as e:
         logger.error(f"Error updating employee: {e}")
         return False, f"❌ Ошибка: {str(e)}"
+
+
+# CLI тестирование
+if __name__ == "__main__":
+    import sys
+    
+    logging.basicConfig(level=logging.INFO)
+    
+    print("=" * 60)
+    print("Google Sheets Connection Test")
+    print("=" * 60)
+    
+    if len(sys.argv) > 1 and sys.argv[1] == "test":
+        result = test_sheets_connection()
+        print(f"\nSuccess: {result['success']}")
+        print(f"Credentials found: {result['credentials_found']}")
+        print(f"Service created: {result['service_created']}")
+        print(f"Sheet accessible: {result['sheet_accessible']}")
+        if result['error']:
+            print(f"Error: {result['error']}")
+        print("\nDetails:")
+        for detail in result['details']:
+            print(f"  - {detail}")
+    else:
+        print("\nUsage: python google_sheets.py test")
+        print("\nMake sure to set one of these environment variables:")
+        print("  - GOOGLE_SERVICE_ACCOUNT_B64 (base64-encoded JSON)")
+        print("  - GOOGLE_SERVICE_ACCOUNT (JSON string)")
+        print("  - GOOGLE_APPLICATION_CREDENTIALS (path to JSON file)")
