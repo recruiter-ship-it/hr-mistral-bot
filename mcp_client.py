@@ -958,8 +958,8 @@ def create_web_mcp_server() -> LocalMCPServer:
         }
     })
     
-    server.register_tool("web_search", web_search, {
-        "description": "Поиск в интернете",
+    server.register_tool("web_search_info", web_search, {
+        "description": "Информация о веб-поиске (используйте встроенный web_search для поиска)",
         "parameters": {
             "type": "object",
             "properties": {
