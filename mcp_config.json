@@ -1,0 +1,39 @@
+{
+  "mcpServers": [
+    {
+      "name": "filesystem",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {}
+    },
+    {
+      "name": "github",
+      "command": "npx", 
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "transport": "stdio",
+      "enabled": false,
+      "env": {
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+    {
+      "name": "postgres",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres"],
+      "transport": "stdio", 
+      "enabled": false,
+      "env": {
+        "DATABASE_URL": "${DATABASE_URL}"
+      }
+    },
+    {
+      "name": "office",
+      "url": "http://localhost:3001",
+      "transport": "http",
+      "enabled": false
+    }
+  ],
+  "_comment": "Enable servers by setting 'enabled' to true and configuring env variables"
+}

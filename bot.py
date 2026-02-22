@@ -23,6 +23,9 @@ from document_generator import (
     create_interview_invite
 )
 
+# Импорт MCP системы (как в OpenClaw)
+from mcp_client import mcp_orchestrator, MCPServerConfig, MCPTransport
+
 # Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -477,18 +480,28 @@ def get_all_tools():
 def initialize_agent():
     """Создание Mistral агента при старте бота"""
     global mistral_agent
+    
+    # Инициализируем MCP оркестратор
+    asyncio.get_event_loop().run_until_complete(mcp_orchestrator.initialize())
+    
     try:
+        # Объединяем базовые инструменты с MCP инструментами
+        base_tools = get_all_tools()
+        mcp_tools = mcp_orchestrator.get_all_tools()
+        all_tools = base_tools + mcp_tools
+        
         mistral_agent = mistral_client.beta.agents.create(
             model="mistral-small-latest",
             name="HR Assistant Agent",
-            description="Полноценный HR AI-агент с инструментами управления кандидатами, документами и воркфлоу",
+            description="Полноценный HR AI-агент с MCP инструментами как в OpenClaw",
             instructions=AGENT_INSTRUCTIONS,
-            tools=get_all_tools(),
+            tools=all_tools,
             completion_args={
                 "temperature": 0.7,
             }
         )
-        logging.info(f"Mistral Agent created successfully with ID: {mistral_agent.id}")
+        logging.info(f"Mistral Agent created with ID: {mistral_agent.id}")
+        logging.info(f"Loaded {len(mcp_orchestrator.list_skills())} MCP servers with {len(mcp_tools)} tools")
     except Exception as e:
         logging.error(f"Failed to create Mistral agent: {e}")
         raise
@@ -565,6 +578,43 @@ async def connect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['waiting_for_auth_code'] = True
 
 
+async def show_skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать доступные MCP навыки (как в OpenClaw)"""
+    skills_list = mcp_orchestrator.list_skills()
+    
+    message = "🦞 **MCP Skills (как в OpenClaw):**\n\n"
+    
+    # Локальные серверы
+    local_skills = [s for s in skills_list if s["type"] == "local"]
+    if local_skills:
+        message += "**📦 Встроенные MCP серверы:**\n"
+        for skill in local_skills:
+            status = "✅" if skill["enabled"] else "❌"
+            message += f"{status} **{skill['name']}** - {skill['description']}\n"
+            message += f"   └ {skill['tools_count']} инструментов\n"
+    
+    # Внешние серверы
+    external_skills = [s for s in skills_list if s["type"] == "external"]
+    if external_skills:
+        message += "\n**🔌 Внешние MCP серверы:**\n"
+        for skill in external_skills:
+            status = "🟢" if skill.get("connected") else "🔴"
+            message += f"{status} **{skill['name']}** - {skill['tools_count']} инструментов\n"
+    
+    message += "\n**📋 Доступные MCP серверы для подключения:**\n"
+    message += "• **filesystem** - работа с файлами\n"
+    message += "• **github** - интеграция с GitHub\n"
+    message += "• **postgres** - работа с PostgreSQL\n"
+    message += "• **office-mcp** - Office документы\n"
+    
+    message += "\n💡 *MCP (Model Context Protocol) — стандарт для подключения навыков.*\n"
+    message += "Настройте mcp_config.json для добавления внешних серверов."
+    message += "\n\n/mcp_add <name> <command> - добавить сервер"
+    message += "\n/mcp_remove <name> - удалить сервер"
+    
+    await update.message.reply_text(message, parse_mode='Markdown')
+
+
 async def show_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать события календаря"""
     user_id = update.effective_user.id
@@ -605,11 +655,105 @@ async def disconnect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def mcp_add_server(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Добавить MCP сервер"""
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text(
+            "📋 **Добавление MCP сервера:**\n\n"
+            "Формат: `/mcp_add <name> <command>`\n\n"
+            "Примеры:\n"
+            "• `/mcp_add filesystem npx -y @modelcontextprotocol/server-filesystem /tmp`\n"
+            "• `/mcp_add github npx -y @modelcontextprotocol/server-github`\n\n"
+            "Или отредактируйте mcp_config.json напрямую.",
+            parse_mode='Markdown'
+        )
+        return
+    
+    name = context.args[0]
+    command = context.args[1]
+    args = context.args[2:] if len(context.args) > 2 else []
+    
+    config = MCPServerConfig(
+        name=name,
+        command=command,
+        args=args,
+        transport=MCPTransport.STDIO,
+        enabled=True
+    )
+    
+    success = await mcp_orchestrator.add_external_server(config)
+    
+    if success:
+        await update.message.reply_text(
+            f"✅ MCP сервер **{name}** добавлен и подключён!",
+            parse_mode='Markdown'
+        )
+    else:
+        await update.message.reply_text(
+            f"❌ Не удалось подключить сервер **{name}**. Проверьте команду.",
+            parse_mode='Markdown'
+        )
+
+
+async def mcp_remove_server(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Удалить MCP сервер"""
+    if not context.args:
+        await update.message.reply_text(
+            "📋 Формат: `/mcp_remove <name>`",
+            parse_mode='Markdown'
+        )
+        return
+    
+    name = context.args[0]
+    success = mcp_orchestrator.remove_external_server(name)
+    
+    if success:
+        await update.message.reply_text(f"✅ MCP сервер **{name}** удалён.", parse_mode='Markdown')
+    else:
+        await update.message.reply_text(f"❌ Сервер **{name}** не найден.", parse_mode='Markdown')
+
+
+async def execute_mcp_tool(tool_name: str, params: dict) -> str:
+    """Выполнение MCP инструмента"""
+    result = await mcp_orchestrator.call_tool(tool_name, params)
+    
+    if isinstance(result, dict):
+        if result.get("success"):
+            if "content" in result:
+                return result["content"]
+            elif "message" in result:
+                return result["message"]
+            elif "filename" in result:
+                return f"✅ Файл создан: {result['filename']}"
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        else:
+            return f"❌ Ошибка: {result.get('error', 'Unknown error')}"
+    return str(result)
+
+
 def execute_tool_function(function_name: str, function_params: dict, user_id: int = None) -> str:
     """Выполнение функции инструмента"""
     logging.info(f"Executing tool: {function_name} with params: {function_params}")
     
     try:
+        # Сначала проверяем MCP инструменты
+        mcp_tools = mcp_orchestrator.get_tool_names()
+        if function_name in mcp_tools:
+            # MCP инструменты выполняем асинхронно
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Если уже в async контексте
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = loop.run_in_executor(
+                        pool, 
+                        lambda: asyncio.run(execute_mcp_tool(function_name, function_params))
+                    )
+                    return f"MCP tool queued: {function_name}"
+            else:
+                result = loop.run_until_complete(execute_mcp_tool(function_name, function_params))
+                return result
+        
         # === Календарь ===
         if function_name == "get_calendar_events":
             days = function_params.get('days', 7)
@@ -1055,7 +1199,7 @@ if __name__ == '__main__':
     db.init_db()
     
     # Инициализируем Mistral агента
-    logging.info("Initializing Mistral Agent...")
+    logging.info("Initializing Mistral Agent with MCP support...")
     initialize_agent()
     
     application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
@@ -1065,6 +1209,9 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler('connect', connect_google))
     application.add_handler(CommandHandler('calendar', show_calendar))
     application.add_handler(CommandHandler('disconnect', disconnect_google))
+    application.add_handler(CommandHandler('skills', show_skills))
+    application.add_handler(CommandHandler('mcp_add', mcp_add_server))
+    application.add_handler(CommandHandler('mcp_remove', mcp_remove_server))
     
     # Обработчики сообщений
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
