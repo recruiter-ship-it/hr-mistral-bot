@@ -1339,10 +1339,6 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await context.bot.send_chat_action(chat_id=chat_id, action="typing")
     
-    status_message = await update.message.reply_text(
-        "🎤 Обрабатываю голосовое сообщение..."
-    )
-    
     try:
         # Скачиваем голосовое сообщение
         new_file = await context.bot.get_file(voice.file_id)
@@ -1368,8 +1364,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         if not os.path.exists(wav_path):
-            await status_message.edit_text(
-                "❌ Не удалось конвертировать аудио. Попробуйте ещё раз."
+            await update.message.reply_text(
+                "❌ Не удалось обработать аудио. Попробуйте ещё раз."
             )
             return
         
@@ -1394,26 +1390,15 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 transcription = '\n'.join([l for l in lines if "Initializing" not in l and "🚀" not in l]).strip()
             
             if transcription:
-                # Экранируем спецсимволы для Markdown
-                safe_transcription = transcription.replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
-                
-                await status_message.edit_text(
-                    f"📝 *Транскрибация:*\n\n{safe_transcription}\n\n"
-                    f"💬 Обрабатываю через AI...",
-                    parse_mode='Markdown'
-                )
-                
-                # Обрабатываем текст через AI
-                await process_ai_request(update, context, transcription, is_file=True)
+                # Сразу обрабатываем через AI без промежуточного сообщения
+                await process_ai_request(update, context, transcription, is_file=False)
             else:
-                await status_message.edit_text(
+                await update.message.reply_text(
                     "❌ Не удалось распознать речь. Попробуйте записать сообщение чётче."
                 )
         else:
-            error_msg = result.stderr if result.stderr else "Неизвестная ошибка"
-            logging.error(f"ASR failed: {error_msg}")
-            await status_message.edit_text(
-                f"❌ Ошибка распознавания: {error_msg[:100]}"
+            await update.message.reply_text(
+                "❌ Не удалось распознать речь. Попробуйте ещё раз."
             )
         
         # Удаляем временные файлы
@@ -1425,7 +1410,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
     except Exception as e:
         logging.error(f"Error processing voice message: {e}", exc_info=True)
-        await status_message.edit_text(
+        await update.message.reply_text(
             f"❌ Ошибка обработки: {str(e)[:100]}"
         )
 
