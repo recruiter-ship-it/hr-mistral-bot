@@ -1394,8 +1394,11 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 transcription = '\n'.join([l for l in lines if "Initializing" not in l and "🚀" not in l]).strip()
             
             if transcription:
+                # Экранируем спецсимволы для Markdown
+                safe_transcription = transcription.replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
+                
                 await status_message.edit_text(
-                    f"📝 **Транскрибация:**\n\n{transcription}\n\n"
+                    f"📝 *Транскрибация:*\n\n{safe_transcription}\n\n"
                     f"💬 Обрабатываю через AI...",
                     parse_mode='Markdown'
                 )
