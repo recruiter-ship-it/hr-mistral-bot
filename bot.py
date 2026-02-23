@@ -5,6 +5,8 @@ import json
 import fitz  # PyMuPDF
 from docx import Document
 import base64
+from pathlib import Path
+from datetime import datetime
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 from telegram.error import BadRequest
@@ -110,6 +112,10 @@ AGENT_INSTRUCTIONS = """
 **📊 Аналитика:**
 - **analytics_create_report** - создать отчёт
 - **analytics_create_chart** - создать график
+
+**🎤 Голосовые сообщения:**
+- **voice_transcribe** - транскрибировать аудио в текст
+- **voice_speak** - озвучить текст (TTS)
 
 ## 📋 Примеры запросов:
 
@@ -529,17 +535,28 @@ def initialize_agent():
     # Инициализируем MCP оркестратор
     asyncio.get_event_loop().run_until_complete(mcp_orchestrator.initialize())
     
+    # Настраиваем ToolExecutor (как в OpenClaw)
+    from mcp_client import setup_tool_executor
+    from tool_executor import tool_executor
+    
+    executor = setup_tool_executor()
+    
     try:
-        # Объединяем базовые инструменты с MCP инструментами
+        # Объединяем базовые инструменты с MCP инструментами через ToolExecutor
         base_tools = get_all_tools()
         mcp_tools = mcp_orchestrator.get_all_tools()
+        executor_tools = executor.build_tools_for_mistral()
         all_tools = base_tools + mcp_tools
+        
+        # Добавляем промпт навыков к инструкциям (как buildWorkspaceSkillsPrompt в OpenClaw)
+        skills_prompt = executor.get_skills_prompt()
+        full_instructions = AGENT_INSTRUCTIONS + "\n\n" + skills_prompt
         
         mistral_agent = mistral_client.beta.agents.create(
             model="mistral-small-latest",
             name="HR Assistant Agent",
             description="Полноценный HR AI-агент с MCP инструментами как в OpenClaw",
-            instructions=AGENT_INSTRUCTIONS,
+            instructions=full_instructions,
             tools=all_tools,
             completion_args={
                 "temperature": 0.7,
@@ -547,6 +564,7 @@ def initialize_agent():
         )
         logging.info(f"Mistral Agent created with ID: {mistral_agent.id}")
         logging.info(f"Loaded {len(mcp_orchestrator.list_skills())} MCP servers with {len(mcp_tools)} tools")
+        logging.info(f"ToolExecutor registered {len(executor.registry.tools)} tools")
     except Exception as e:
         logging.error(f"Failed to create Mistral agent: {e}")
         raise
@@ -759,46 +777,67 @@ async def mcp_remove_server(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def execute_mcp_tool(tool_name: str, params: dict) -> str:
-    """Выполнение MCP инструмента"""
-    result = await mcp_orchestrator.call_tool(tool_name, params)
+    """Выполнение MCP инструмента через ToolExecutor (как в OpenClaw)"""
+    from tool_executor import tool_executor
     
-    if isinstance(result, dict):
-        if result.get("success"):
-            if "content" in result:
-                return result["content"]
-            elif "message" in result:
-                return result["message"]
-            elif "filename" in result:
-                return f"✅ Файл создан: {result['filename']}"
-            return json.dumps(result, ensure_ascii=False, indent=2)
-        else:
-            return f"❌ Ошибка: {result.get('error', 'Unknown error')}"
-    return str(result)
+    result = await tool_executor.execute(tool_name, params)
+    
+    if result.success:
+        if isinstance(result.result, dict):
+            if result.result.get("success"):
+                if "content" in result.result:
+                    return result.result["content"]
+                elif "message" in result.result:
+                    return result.result["message"]
+                elif "filename" in result.result:
+                    return f"✅ Файл создан: {result.result['filename']}"
+            return json.dumps(result.result, ensure_ascii=False, indent=2)
+        return str(result.result)
+    else:
+        return f"❌ Ошибка: {result.error}"
 
 
-def execute_tool_function(function_name: str, function_params: dict, user_id: int = None) -> str:
-    """Выполнение функции инструмента"""
-    logging.info(f"Executing tool: {function_name} with params: {function_params}")
+async def execute_tool_async(tool_name: str, params: dict, user_id: int = None) -> str:
+    """
+    Асинхронное выполнение инструмента через ToolExecutor (как в OpenClaw pi-embedded-runner.ts)
+    
+    Это главный метод для выполнения всех инструментов агента.
+    """
+    from tool_executor import tool_executor
+    
+    # Сначала пробуем через ToolExecutor (MCP и extended skills)
+    if tool_name in tool_executor.registry.get_tool_names():
+        result = await tool_executor.execute(tool_name, params, user_id)
+        if result.success:
+            if isinstance(result.result, dict):
+                if result.result.get("success"):
+                    # Для image_generate возвращаем полный результат (с путём)
+                    if "path" in result.result:
+                        return result.result  # Возвращаем словарь!
+                    if "content" in result.result:
+                        return result.result["content"]
+                    elif "message" in result.result:
+                        return result.result["message"]
+                    elif "filename" in result.result:
+                        return f"✅ Файл создан: {result.result['filename']}"
+                return json.dumps(result.result, ensure_ascii=False, indent=2)
+            return str(result.result)
+        return f"❌ Ошибка: {result.error}"
+    
+    # Затем пробуем MCP оркестратор напрямую
+    mcp_tools = mcp_orchestrator.get_tool_names()
+    if tool_name in mcp_tools:
+        return await execute_mcp_tool(tool_name, params)
+    
+    # Встроенные HR инструменты
+    return _execute_builtin_tool(tool_name, params, user_id)
+
+
+def _execute_builtin_tool(function_name: str, function_params: dict, user_id: int = None) -> str:
+    """Выполнение встроенных HR инструментов"""
+    logging.info(f"Executing builtin tool: {function_name}")
     
     try:
-        # Сначала проверяем MCP инструменты
-        mcp_tools = mcp_orchestrator.get_tool_names()
-        if function_name in mcp_tools:
-            # MCP инструменты выполняем асинхронно
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Если уже в async контексте
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    result = loop.run_in_executor(
-                        pool, 
-                        lambda: asyncio.run(execute_mcp_tool(function_name, function_params))
-                    )
-                    return f"MCP tool queued: {function_name}"
-            else:
-                result = loop.run_until_complete(execute_mcp_tool(function_name, function_params))
-                return result
-        
         # === Календарь ===
         if function_name == "get_calendar_events":
             days = function_params.get('days', 7)
@@ -955,10 +994,7 @@ def execute_tool_function(function_name: str, function_params: dict, user_id: in
         
         # === Воркфлоу ===
         elif function_name == "onboard_employee":
-            # Полный онбординг
             results = []
-            
-            # 1. Добавляем в таблицу
             add_result = google_sheets.add_employee(
                 employee_name=function_params.get('employee_name'),
                 role=function_params.get('position'),
@@ -968,7 +1004,6 @@ def execute_tool_function(function_name: str, function_params: dict, user_id: in
             )
             results.append(f"📋 Таблица: {add_result[1][:100]}")
             
-            # 2. Создаём welcome-документ
             welcome_result = create_welcome_document(
                 candidate_name=function_params.get('employee_name'),
                 position=function_params.get('position'),
@@ -981,7 +1016,6 @@ def execute_tool_function(function_name: str, function_params: dict, user_id: in
             else:
                 results.append("📄 Welcome: контент готов")
             
-            # 3. Создаём оффер если есть зарплата
             if function_params.get('salary'):
                 offer_result = create_offer_document(
                     candidate_name=function_params.get('employee_name'),
@@ -1004,17 +1038,13 @@ def execute_tool_function(function_name: str, function_params: dict, user_id: in
                 "experience": function_params.get('experience'),
                 "source": function_params.get('source')
             })
-            
-            # Ищем подходящие вакансии
             vacancies = hr_agent_core.memory.get_open_vacancies()
             matching = [v for v in vacancies if function_params.get('position', '').lower() in v.get('title', '').lower()]
-            
             result = f"✅ Кандидат сохранён (ID: {candidate_id})\n"
             if matching:
                 result += f"🔍 Найдено {len(matching)} подходящих вакансий"
             else:
                 result += "📋 Подходящих вакансий пока нет"
-            
             return result
         
         elif function_name == "start_workflow":
@@ -1034,7 +1064,30 @@ def execute_tool_function(function_name: str, function_params: dict, user_id: in
             return f"❌ Неизвестная функция: {function_name}"
     
     except Exception as e:
-        logging.error(f"Error executing tool {function_name}: {e}")
+        logging.error(f"Error executing builtin tool {function_name}: {e}")
+        return f"❌ Ошибка выполнения: {str(e)}"
+
+
+async def execute_tool_function(function_name: str, function_params: dict, user_id: int = None) -> str:
+    """Выполнение функции инструмента (асинхронная версия)"""
+    logging.info(f"Executing tool: {function_name} with params: {function_params}")
+    
+    try:
+        # Сначала проверяем ToolExecutor (как в OpenClaw)
+        from tool_executor import tool_executor
+        if function_name in tool_executor.registry.get_tool_names():
+            return await execute_tool_async(function_name, function_params, user_id)
+        
+        # Затем проверяем MCP инструменты
+        mcp_tools = mcp_orchestrator.get_tool_names()
+        if function_name in mcp_tools:
+            return await execute_mcp_tool(function_name, function_params)
+        
+        # Встроенные HR инструменты
+        return _execute_builtin_tool(function_name, function_params, user_id)
+    
+    except Exception as e:
+        logging.error(f"Error executing tool: {e}")
         return f"❌ Ошибка выполнения: {str(e)}"
 
 
@@ -1086,13 +1139,50 @@ async def process_ai_request(update, context, user_input, is_file=False):
                 
                 logging.info(f"Tool call: {function_name} with params: {function_params}")
                 
-                # Выполняем функцию
-                result = execute_tool_function(function_name, function_params, user_id)
+                # Выполняем функцию (await для async)
+                result = await execute_tool_function(function_name, function_params, user_id)
+                
+                # Если сгенерировано изображение - отправляем его в Telegram
+                image_path = None
+                if function_name == "image_generate" and result:
+                    # Парсим путь к изображению из результата
+                    if isinstance(result, dict) and result.get("success") and result.get("path"):
+                        image_path = result["path"]
+                    elif isinstance(result, str) and "создано" in result.lower():
+                        # Извлекаем имя файла из строки "✅ Изображение создано: filename.png"
+                        import re
+                        match = re.search(r'(generated_\d+\.png)', result)
+                        if match:
+                            image_path = f"/home/z/my-project/hr-mistral-bot/workspace/images/{match.group(1)}"
+                
+                if image_path and Path(image_path).exists():
+                    try:
+                        prompt_text = ""
+                        if isinstance(result, dict):
+                            prompt_text = result.get('prompt', '')
+                        await context.bot.send_photo(
+                            chat_id=chat_id,
+                            photo=open(image_path, 'rb'),
+                            caption=f"🎨 {prompt_text}" if prompt_text else "🎨 Сгенерированное изображение"
+                        )
+                        logging.info(f"Sent generated image: {image_path}")
+                    except Exception as e:
+                        logging.error(f"Failed to send image: {e}")
+                
+                # Преобразуем результат в строку для Mistral API
+                if isinstance(result, dict):
+                    # Для изображений - сообщаем что уже отправлено
+                    if result.get("success") and result.get("path"):
+                        result_str = f"✅ Изображение успешно создано и отправлено пользователю. Файл: {result.get('filename', 'image.png')}"
+                    else:
+                        result_str = result.get("message", json.dumps(result, ensure_ascii=False))
+                else:
+                    result_str = str(result)
                 
                 tool_results.append({
                     "type": "function.result",
                     "tool_call_id": tool_call.tool_call_id,
-                    "result": result
+                    "result": result_str
                 })
             
             # Отправляем результаты tool calls обратно в агента
@@ -1239,6 +1329,104 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка голосовых сообщений - транскрибация в текст"""
+    chat_id = update.effective_chat.id
+    voice = update.message.voice
+    
+    if not voice:
+        return
+    
+    await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+    
+    status_message = await update.message.reply_text(
+        "🎤 Обрабатываю голосовое сообщение..."
+    )
+    
+    try:
+        # Скачиваем голосовое сообщение
+        new_file = await context.bot.get_file(voice.file_id)
+        
+        temp_dir = "/home/z/my-project/hr-mistral-bot/workspace/audio"
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ogg_path = f"{temp_dir}/voice_{timestamp}.ogg"
+        wav_path = f"{temp_dir}/voice_{timestamp}.wav"
+        
+        await new_file.download_to_drive(ogg_path)
+        
+        logging.info(f"Downloaded voice message to: {ogg_path}")
+        
+        # Конвертируем OGG в WAV (z-ai asr не поддерживает OGG)
+        import subprocess
+        convert_result = subprocess.run(
+            ['ffmpeg', '-y', '-i', ogg_path, '-ar', '16000', '-ac', '1', wav_path],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if not os.path.exists(wav_path):
+            await status_message.edit_text(
+                "❌ Не удалось конвертировать аудио. Попробуйте ещё раз."
+            )
+            return
+        
+        logging.info(f"Converted to WAV: {wav_path}")
+        
+        # Транскрибируем через z-ai CLI
+        result = subprocess.run(
+            ['z-ai', 'asr', '-f', wav_path],
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        
+        logging.info(f"ASR result: returncode={result.returncode}, stdout={result.stdout[:200] if result.stdout else 'empty'}")
+        
+        if result.returncode == 0 and result.stdout.strip():
+            transcription = result.stdout.strip()
+            
+            # Убираем служебные сообщения из вывода
+            if "Initializing Z-AI SDK" in transcription:
+                lines = transcription.split('\n')
+                transcription = '\n'.join([l for l in lines if "Initializing" not in l and "🚀" not in l]).strip()
+            
+            if transcription:
+                await status_message.edit_text(
+                    f"📝 **Транскрибация:**\n\n{transcription}\n\n"
+                    f"💬 Обрабатываю через AI...",
+                    parse_mode='Markdown'
+                )
+                
+                # Обрабатываем текст через AI
+                await process_ai_request(update, context, transcription, is_file=True)
+            else:
+                await status_message.edit_text(
+                    "❌ Не удалось распознать речь. Попробуйте записать сообщение чётче."
+                )
+        else:
+            error_msg = result.stderr if result.stderr else "Неизвестная ошибка"
+            logging.error(f"ASR failed: {error_msg}")
+            await status_message.edit_text(
+                f"❌ Ошибка распознавания: {error_msg[:100]}"
+            )
+        
+        # Удаляем временные файлы
+        for path in [ogg_path, wav_path]:
+            try:
+                os.remove(path)
+            except:
+                pass
+            
+    except Exception as e:
+        logging.error(f"Error processing voice message: {e}", exc_info=True)
+        await status_message.edit_text(
+            f"❌ Ошибка обработки: {str(e)[:100]}"
+        )
+
+
 if __name__ == '__main__':
     # Инициализируем БД
     db.init_db()
@@ -1262,6 +1450,7 @@ if __name__ == '__main__':
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     
     # Запускаем notification loop в фоне
     loop = asyncio.get_event_loop()

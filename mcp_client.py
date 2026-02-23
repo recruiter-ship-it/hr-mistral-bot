@@ -1147,5 +1147,87 @@ class MCPOrchestrator:
         return self.client_manager.remove_server(name)
 
 
+    async def call_local_tool(self, tool_name: str, arguments: Dict) -> Any:
+        """Вызов локального инструмента (для ToolExecutor)"""
+        if tool_name not in self.tool_to_server:
+            return {"error": f"Tool {tool_name} not found"}
+        
+        server_name, is_local, is_extended = self.tool_to_server[tool_name]
+        
+        if is_local:
+            server = self.local_servers.get(server_name)
+            if server:
+                return await server.call_tool(tool_name, arguments)
+        
+        return {"error": f"Tool {tool_name} is not a local tool"}
+
+
+# ============================================================
+# TOOL EXECUTOR INTEGRATION
+# ============================================================
+
+def setup_tool_executor():
+    """
+    Настройка ToolExecutor с интеграцией MCP Orchestrator.
+    Вызывается при инициализации бота.
+    """
+    from tool_executor import tool_executor, ToolDefinition, ToolType
+    
+    # Устанавливаем MCP оркестратор
+    tool_executor.set_mcp_orchestrator(mcp_orchestrator)
+    
+    # Устанавливаем расширенные навыки
+    if mcp_orchestrator.extended_skills:
+        tool_executor.set_extended_skills(mcp_orchestrator.extended_skills)
+    
+    # Регистрируем все инструменты в ToolExecutor
+    for tool_name, (server_name, is_local, is_extended) in mcp_orchestrator.tool_to_server.items():
+        # Получаем схему инструмента
+        schema = None
+        tool_type = ToolType.LOCAL
+        
+        if is_extended and mcp_orchestrator.extended_skills:
+            # Ищем в extended skills
+            for skill in mcp_orchestrator.extended_skills.skills.values():
+                for tool in skill.tools:
+                    if tool.name == tool_name:
+                        schema = {
+                            "description": tool.description,
+                            "parameters": tool.parameters
+                        }
+                        tool_type = ToolType.EXTENDED
+                        break
+        elif is_local:
+            server = mcp_orchestrator.local_servers.get(server_name)
+            if server and tool_name in server.tool_schemas:
+                schema = server.tool_schemas[tool_name]
+                tool_type = ToolType.MCP_BUILTIN
+        else:
+            # Внешний MCP сервер
+            for conn in mcp_orchestrator.client_manager.servers.values():
+                for tool in conn.tools:
+                    if tool.name == tool_name:
+                        schema = {
+                            "description": tool.description,
+                            "parameters": tool.input_schema
+                        }
+                        tool_type = ToolType.MCP_EXTERNAL
+                        break
+        
+        if schema:
+            tool_def = ToolDefinition(
+                name=tool_name,
+                description=schema.get("description", ""),
+                parameters=schema.get("parameters", {}),
+                tool_type=tool_type,
+                server_name=server_name if not is_extended else None,
+                skill_name=server_name if is_extended else None
+            )
+            tool_executor.registry.register(tool_def)
+    
+    logger.info(f"ToolExecutor setup complete: {len(tool_executor.registry.tools)} tools registered")
+    return tool_executor
+
+
 # Глобальный экземпляр
 mcp_orchestrator = MCPOrchestrator()

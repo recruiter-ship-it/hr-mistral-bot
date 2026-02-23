@@ -1701,6 +1701,248 @@ class AnalyticsSkill(BaseSkill):
 
 
 # ============================================================
+# VOICE SKILL (Голосовой ввод/вывод)
+# ============================================================
+
+class VoiceSkill(BaseSkill):
+    """
+    Навык работы с голосом.
+    Транскрибация аудио в текст (ASR) и синтез речи (TTS).
+    """
+    
+    name = "voice"
+    description = "Голосовой ввод/вывод: транскрибация аудио, синтез речи"
+    
+    OUTPUT_DIR = Path("/home/z/my-project/hr-mistral-bot/workspace/audio")
+    
+    def __init__(self):
+        self.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        self._init_tools()
+    
+    def _init_tools(self):
+        self.tools = [
+            SkillTool(
+                name="voice_transcribe",
+                description="Транскрибировать аудиофайл в текст (поддерживает MP3, WAV, OGG, WebM)",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Путь к аудиофайлу"},
+                        "language": {"type": "string", "description": "Язык (ru, en)", "default": "ru"}
+                    },
+                    "required": ["file_path"]
+                },
+                handler=self.transcribe
+            ),
+            SkillTool(
+                name="voice_speak",
+                description="Преобразовать текст в речь (TTS) и вернуть аудиофайл",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "Текст для озвучивания"},
+                        "voice": {"type": "string", "description": "Голос (default, male, female)", "default": "default"},
+                        "speed": {"type": "number", "description": "Скорость речи (0.5-2.0)", "default": 1.0}
+                    },
+                    "required": ["text"]
+                },
+                handler=self.speak
+            ),
+            SkillTool(
+                name="voice_list",
+                description="Показать список транскрибаций",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "limit": {"type": "integer", "description": "Макс. количество", "default": 10}
+                    }
+                },
+                handler=self.list_transcriptions
+            )
+        ]
+    
+    async def transcribe(self, file_path: str, language: str = "ru") -> Dict:
+        """Транскрибировать аудиофайл в текст через z-ai SDK ASR"""
+        try:
+            import base64
+            
+            # Проверяем существование файла
+            audio_path = Path(file_path)
+            if not audio_path.exists():
+                return {"error": f"Файл не найден: {file_path}"}
+            
+            # Читаем аудиофайл и кодируем в base64
+            with open(audio_path, 'rb') as f:
+                audio_data = f.read()
+            
+            audio_base64 = base64.b64encode(audio_data).decode('utf-8')
+            
+            # Используем z-ai-web-dev-sdk для ASR
+            import sys
+            sys.path.insert(0, '/home/z/my-project')
+            
+            from z_ai_sdk import ZAI
+            
+            zai = await ZAI.create()
+            
+            # Вызываем ASR
+            result = await zai.asr.transcribe(
+                audio=audio_base64,
+                language=language
+            )
+            
+            # Сохраняем результат
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            result_file = self.OUTPUT_DIR / f"transcription_{timestamp}.txt"
+            
+            transcription_text = result.text if hasattr(result, 'text') else str(result)
+            
+            with open(result_file, 'w', encoding='utf-8') as f:
+                f.write(f"# Транскрибация {timestamp}\n")
+                f.write(f"# Файл: {file_path}\n")
+                f.write(f"# Язык: {language}\n\n")
+                f.write(transcription_text)
+            
+            return {
+                "success": True,
+                "text": transcription_text,
+                "language": language,
+                "audio_file": str(audio_path),
+                "result_file": str(result_file),
+                "message": f"✅ Транскрибация完成: {len(transcription_text)} символов"
+            }
+            
+        except ImportError as e:
+            # Fallback: используем CLI команду
+            try:
+                # z-ai asr не имеет параметра языка, используем только -f
+                result = subprocess.run(
+                    ['z-ai', 'asr', '-f', file_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+                
+                if result.returncode == 0:
+                    transcription = result.stdout.strip()
+                    
+                    # Сохраняем результат
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    result_file = self.OUTPUT_DIR / f"transcription_{timestamp}.txt"
+                    
+                    with open(result_file, 'w', encoding='utf-8') as f:
+                        f.write(transcription)
+                    
+                    return {
+                        "success": True,
+                        "text": transcription,
+                        "result_file": str(result_file),
+                        "message": f"✅ Транскрибация完成: {len(transcription)} символов"
+                    }
+                else:
+                    return {"error": f"ASR failed: {result.stderr}"}
+                    
+            except Exception as e2:
+                return {"error": f"ASR error: {str(e2)}"}
+                
+        except Exception as e:
+            return {"error": str(e)}
+    
+    async def speak(self, text: str, voice: str = "default", speed: float = 1.0) -> Dict:
+        """Синтез речи через z-ai SDK TTS"""
+        try:
+            import sys
+            sys.path.insert(0, '/home/z/my-project')
+            
+            from z_ai_sdk import ZAI
+            
+            zai = await ZAI.create()
+            
+            # Генерируем уникальное имя файла
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_file = self.OUTPUT_DIR / f"speech_{timestamp}.wav"
+            
+            # Вызываем TTS
+            result = await zai.tts.synthesize(
+                text=text,
+                voice=voice,
+                speed=speed
+            )
+            
+            # Сохраняем аудио
+            if hasattr(result, 'audio'):
+                audio_data = result.audio
+                if isinstance(audio_data, str):
+                    # base64 encoded
+                    audio_data = base64.b64decode(audio_data)
+                
+                with open(output_file, 'wb') as f:
+                    f.write(audio_data)
+                
+                return {
+                    "success": True,
+                    "audio_file": str(output_file),
+                    "text": text,
+                    "voice": voice,
+                    "message": f"✅ Аудио создано: {output_file.name}"
+                }
+            else:
+                return {"error": "No audio data in response"}
+                
+        except ImportError:
+            # Fallback: CLI
+            try:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_file = self.OUTPUT_DIR / f"speech_{timestamp}.wav"
+                
+                result = subprocess.run(
+                    ['z-ai', 'tts', '-t', text, '-o', str(output_file), '-v', voice],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                
+                if result.returncode == 0 and output_file.exists():
+                    return {
+                        "success": True,
+                        "audio_file": str(output_file),
+                        "text": text,
+                        "message": f"✅ Аудио создано: {output_file.name}"
+                    }
+                else:
+                    return {"error": f"TTS failed: {result.stderr}"}
+                    
+            except Exception as e2:
+                return {"error": f"TTS error: {str(e2)}"}
+                
+        except Exception as e:
+            return {"error": str(e)}
+    
+    def list_transcriptions(self, limit: int = 10) -> Dict:
+        """Список транскрибаций"""
+        try:
+            files = []
+            for f in self.OUTPUT_DIR.glob("transcription_*.txt"):
+                stat = f.stat()
+                files.append({
+                    "filename": f.name,
+                    "path": str(f),
+                    "size": stat.st_size,
+                    "created": datetime.fromtimestamp(stat.st_ctime).isoformat()
+                })
+            
+            files.sort(key=lambda x: x["created"], reverse=True)
+            
+            return {
+                "success": True,
+                "transcriptions": files[:limit],
+                "total": len(files)
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+
+# ============================================================
 # SKILLS REGISTRY
 # ============================================================
 
@@ -1721,7 +1963,8 @@ class SkillsRegistry:
             CommunicationSkill(),
             ImageSkill(),
             DatabaseSkill(),
-            AnalyticsSkill()
+            AnalyticsSkill(),
+            VoiceSkill()
         ]
         
         for skill in default_skills:
