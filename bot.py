@@ -572,6 +572,17 @@ def initialize_agent():
         raise
 
 
+def escape_markdown(text):
+    """Экранирование спецсимволов для Telegram Markdown"""
+    if not text:
+        return text
+    # Экранируем только специальные символы Markdown
+    special_chars = ['_', '*', '`', '[', ']', '(', ')', '~', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for char in special_chars:
+        text = text.replace(char, f'\\{char}')
+    return text
+
+
 def format_markdown(text):
     """Форматирование текста для Telegram (поддержка Markdown)"""
     return text
@@ -1322,13 +1333,22 @@ async def process_ai_request(update, context, user_input, is_file=False):
         # Форматируем текст
         full_response = format_markdown(full_response)
         
-        # Отправляем финальный ответ
-        await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message.message_id,
-            text=full_response,
-            parse_mode='Markdown'
-        )
+        # Отправляем финальный ответ (без Markdown для избежания ошибок парсинга)
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message.message_id,
+                text=full_response,
+                parse_mode='Markdown'
+            )
+        except Exception as markdown_error:
+            # Если Markdown не работает, отправляем без форматирования
+            logging.warning(f"Markdown error, sending plain text: {markdown_error}")
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message.message_id,
+                text=full_response
+            )
                 
     except Exception as e:
         logging.error(f"Error in process_ai_request: {e}")
