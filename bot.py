@@ -15,9 +15,6 @@ import database as db
 import google_auth
 from google_calendar_manager import GoogleCalendarManager
 from notifications import notification_loop
-import google_sheets
-import zoom_auth
-from zoom_manager import zoom_manager
 
 # Импорт ядра агента
 from agent_core import hr_agent as hr_agent_core, TaskStatus
@@ -600,9 +597,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👥 Кандидаты:\n"
         "• Сохранение и поиск кандидатов\n"
         "• Управление статусами\n\n"
-        "📊 Сотрудники (Google Sheets):\n"
-        "• Добавление в таблицу\n"
-        "• Поиск и обновление данных\n\n"
         "📄 Документы (Google Docs):\n"
         "• Офферы и welcome-письма\n"
         "• Scorecards и приглашения\n\n"
@@ -612,9 +606,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📅 Календарь:\n"
         "/connect - подключить Google Calendar\n"
         "/calendar - показать события\n\n"
-        "📹 Zoom:\n"
-        "/zoom_connect - подключить Zoom\n"
-        "/zoom - создать митинг\n\n"
         "💡 Примеры:\n"
         "• 'Запусти онбординг для Иван, Developer, 01.04.2025'\n"
         "• 'Создай оффер для Мария, QA, 2000 USDT'\n"
@@ -731,101 +722,6 @@ async def disconnect_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "✅ Google Calendar отключен.\n"
         "Используйте /connect для повторного подключения."
-    )
-
-
-# ============================================================
-# ZOOM COMMANDS
-# ============================================================
-
-async def zoom_connect(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда для подключения Zoom"""
-    user_id = update.effective_user.id
-    
-    # Проверяем, уже подключен ли Zoom
-    if zoom_auth.has_valid_credentials(user_id):
-        await update.message.reply_text(
-            "✅ Ваш Zoom уже подключен!\n\n"
-            "Используйте:\n"
-            "/zoom - создать митинг\n"
-            "/zoom_list - список митингов\n"
-            "/zoom_disconnect - отключить Zoom"
-        )
-        return
-    
-    # Генерируем OAuth URL
-    auth_url = zoom_auth.get_auth_url(user_id)
-    
-    await update.message.reply_text(
-        "📹 **Подключение Zoom**\n\n"
-        "Шаг 1: Перейдите по ссылке ниже\n"
-        "Шаг 2: Войдите в Zoom аккаунт\n"
-        "Шаг 3: Нажмите 'Allow'\n"
-        "Шаг 4: Скопируйте код из URL\n"
-        "Шаг 5: Отправьте мне код\n\n"
-        f"🔗 **Ссылка:**\n{auth_url}\n\n"
-        "После авторизации скопируйте параметр `code` из URL "
-        "и отправьте его мне (без команд).",
-        parse_mode='Markdown'
-    )
-    
-    # Сохраняем состояние "ожидает Zoom код"
-    context.user_data['waiting_for_zoom_code'] = True
-
-
-async def zoom_create_meeting(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда для создания Zoom митинга"""
-    user_id = update.effective_user.id
-    
-    # Проверяем авторизацию
-    if not zoom_auth.has_valid_credentials(user_id):
-        await update.message.reply_text(
-            "❌ Zoom не подключен.\n"
-            "Используйте /zoom_connect для подключения."
-        )
-        return
-    
-    # Определяем тему митинга
-    topic = " ".join(context.args) if context.args else "Встреча"
-    
-    await update.message.reply_text("📹 Создаю Zoom митинг...")
-    
-    # Создаём мгновенный митинг
-    message, meeting_data = zoom_manager.create_instant_meeting(user_id, topic)
-    
-    if meeting_data:
-        await update.message.reply_text(message, parse_mode='Markdown')
-    else:
-        await update.message.reply_text(f"❌ {message}")
-
-
-async def zoom_list_meetings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда для показа списка митингов"""
-    user_id = update.effective_user.id
-    
-    # Проверяем авторизацию
-    if not zoom_auth.has_valid_credentials(user_id):
-        await update.message.reply_text(
-            "❌ Zoom не подключен.\n"
-            "Используйте /zoom_connect для подключения."
-        )
-        return
-    
-    await update.message.reply_text("📅 Загружаю список митингов...")
-    
-    message, meetings = zoom_manager.list_meetings(user_id)
-    await update.message.reply_text(message, parse_mode='Markdown')
-
-
-async def zoom_disconnect(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда для отключения Zoom"""
-    user_id = update.effective_user.id
-    
-    zoom_auth.revoke_credentials(user_id)
-    
-    await update.message.reply_text(
-        "✅ Zoom отключен.\n"
-        "Используйте /zoom_connect для повторного подключения."
     )
 
 
@@ -1387,41 +1283,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
     
-    # Проверяем, ожидаем ли мы код авторизации Zoom
-    if context.user_data.get('waiting_for_zoom_code'):
-        await update.message.reply_text("⏳ Проверяю код авторизации Zoom...")
-        
-        # Извлекаем code из текста (может быть полный URL или просто код)
-        code = text.strip()
-        if "code=" in code:
-            # Если прислали полный URL
-            import re
-            match = re.search(r'code=([^&]+)', code)
-            if match:
-                code = match.group(1)
-        
-        success = zoom_auth.save_credentials_from_code(user_id, code)
-        
-        if success:
-            await update.message.reply_text(
-                "✅ Zoom успешно подключен!\n\n"
-                "Теперь вы можете:\n"
-                "📹 /zoom - создать митинг\n"
-                "📹 /zoom Тема митинга - создать митинг с темой\n"
-                "📋 /zoom_list - список митингов"
-            )
-            context.user_data['waiting_for_zoom_code'] = False
-        else:
-            await update.message.reply_text(
-                "❌ Ошибка при подключении Zoom.\n\n"
-                "Возможные причины:\n"
-                "- Неверный код\n"
-                "- Код уже использован\n"
-                "- Код истек (действителен 10 минут)\n\n"
-                "Попробуйте еще раз: /zoom_connect"
-            )
-        return
-    
     # Обычная обработка сообщения
     await process_ai_request(update, context, text)
 
@@ -1588,12 +1449,6 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler('skills', show_skills))
     application.add_handler(CommandHandler('mcp_add', mcp_add_server))
     application.add_handler(CommandHandler('mcp_remove', mcp_remove_server))
-    
-    # Zoom команды
-    application.add_handler(CommandHandler('zoom_connect', zoom_connect))
-    application.add_handler(CommandHandler('zoom', zoom_create_meeting))
-    application.add_handler(CommandHandler('zoom_list', zoom_list_meetings))
-    application.add_handler(CommandHandler('zoom_disconnect', zoom_disconnect))
     
     # Обработчики сообщений
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
