@@ -35,18 +35,13 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
 
       - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Install MCP CLI tools
-        run: |
-          npm install -g npx
-          npx --yes @modelcontextprotocol/server-filesystem --help || true
+          python -m pip install --upgrade pip --quiet
+          pip install -r requirements.txt --quiet
 
       - name: Create workspace directories
         run: |
@@ -74,8 +69,3 @@ jobs:
             python bot.py 2>&1 || echo "[$(date -u)] Bot exited, restarting in 10 seconds..."
             sleep 10
           done
-
-      - name: Notify on failure
-        if: failure()
-        run: |
-          echo "❌ Bot workflow failed at $(date -u)"
