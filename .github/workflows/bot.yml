@@ -1,13 +1,14 @@
-name: HR Mistral Bot Runner
+name: HR Mistral Bot 24/7
 
 on:
   push:
     branches: [ main ]
   schedule:
-    # Запуск каждые 6 часов как backup (на случай сбоев)
+    # Запуск каждые 6 часов: 00:00, 06:00, 12:00, 18:00 UTC
     - cron: '0 */6 * * *'
   workflow_dispatch:
 
+# Отменяем старый workflow при новом запуске
 concurrency:
   group: hr-mistral-bot
   cancel-in-progress: true
@@ -15,32 +16,66 @@ concurrency:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 часов максимум для одной сессии
+    timeout-minutes: 355  # 6 часов - 5 минут запас
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
-      - name: Install dependencies
+          cache: 'pip'
+
+      - name: Set up Node.js (for MCP servers)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      
+
+      - name: Install MCP CLI tools
+        run: |
+          npm install -g npx
+          npx --yes @modelcontextprotocol/server-filesystem --help || true
+
+      - name: Create workspace directories
+        run: |
+          mkdir -p workspace/images
+          mkdir -p workspace/audio
+          mkdir -p workspace/documents
+          mkdir -p workspace/memory
+
       - name: Run Bot with Auto-Restart
         env:
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           GOOGLE_SERVICE_ACCOUNT_B64: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_B64 }}
         run: |
-          # Бесконечный цикл с автоматическим перезапуском при ошибках
+          echo "🚀 Starting HR Bot at $(date -u)"
+          echo "⏰ Will run for ~6 hours until next scheduled restart"
+
+          # Бесконечный цикл с автоматическим перезапуском
           while true; do
-            echo "Starting bot at $(date)"
-            python bot.py || echo "Bot crashed, restarting in 5 seconds..."
-            sleep 5
+            echo "---"
+            echo "[$(date -u)] Starting bot..."
+            python bot.py 2>&1 || echo "[$(date -u)] Bot exited, restarting in 10 seconds..."
+            sleep 10
           done
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Bot workflow failed at $(date -u)"

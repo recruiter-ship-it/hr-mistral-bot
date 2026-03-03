@@ -6,3 +6,12 @@ token.json
 credentials.json
 temp_*
 *.log
+bot.lock
+bot.pid
+workspace/images/
+workspace/audio/
+*.png
+*.wav
+*.ogg
+zoom_states.json
+hr-bot.service

@@ -56,29 +56,23 @@ AGENT_INSTRUCTIONS = """
 - **create_vacancy** - создать новую вакансию
 - **list_vacancies** - показать открытые вакансии
 
-### 3. ТАБЛИЦА СОТРУДНИКОВ (Google Sheets)
-- **add_employee** - добавить сотрудника в таблицу учёта
-- **list_employees** - показать список сотрудников
-- **search_employee** - найти сотрудника по имени
-- **update_employee** - обновить данные сотрудника
-
-### 4. КАЛЕНДАРЬ (Google Calendar)
+### 3. КАЛЕНДАРЬ (Google Calendar)
 - **get_calendar_events** - получить события календаря
 
-### 5. СОЗДАНИЕ ДОКУМЕНТОВ
+### 4. СОЗДАНИЕ ДОКУМЕНТОВ
 - **create_offer** - создать оффер о приёме на работу
 - **create_welcome** - создать welcome-документ для нового сотрудника
 - **create_scorecard** - создать карту оценки кандидата
 - **create_rejection** - создать письмо с отказом
 - **create_interview_invite** - создать приглашение на интервью
 
-### 6. АВТОНОМНЫЕ ВОРКФЛОУ
-- **onboard_employee** - полный процесс онбординга (добавление в таблицу + документы)
+### 5. АВТОНОМНЫЕ ВОРКФЛОУ
+- **onboard_employee** - полный процесс онбординга (создание документов)
 - **process_candidate** - обработка нового кандидата (сохранение + матчинг с вакансиями)
 - **start_workflow** - запустить предопределённый рабочий процесс
 - **get_workflow_status** - проверить статус выполнения воркфлоу
 
-### 7. 🆕 РАСШИРЕННЫЕ НАВЫКИ (как в OpenClaw)
+### 6. 🆕 РАСШИРЕННЫЕ НАВЫКИ (как в OpenClaw)
 
 **📷 Генерация изображений:**
 - **image_generate** - сгенерировать изображение через AI по описанию
@@ -202,70 +196,6 @@ def get_all_tools():
                             "description": "Количество дней для просмотра (по умолчанию 7)"
                         }
                     }
-                }
-            }
-        },
-        
-        # === Сотрудники (Google Sheets) ===
-        {
-            "type": "function",
-            "function": {
-                "name": "add_employee",
-                "description": "Добавить нового сотрудника в таблицу учёта. Использовать когда пользователь хочет добавить нового сотрудника.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "employee_name": {"type": "string", "description": "Полное имя сотрудника"},
-                        "role": {"type": "string", "description": "Должность"},
-                        "recruiter": {"type": "string", "description": "Имя рекрутера (по умолчанию '-//-')"},
-                        "start_date": {"type": "string", "description": "Дата выхода в формате DD/MM/YYYY"},
-                        "salary": {"type": "string", "description": "Зарплата (например, '1500 USDT')"},
-                        "card_link": {"type": "string", "description": "Ссылка на карточку сотрудника"}
-                    },
-                    "required": ["employee_name", "role"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "list_employees",
-                "description": "Показать список сотрудников из таблицы. Можно фильтровать по месяцу.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "month": {"type": "string", "description": "Фильтр по месяцу (Март, Апрель и т.д.)"}
-                    }
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "search_employee",
-                "description": "Найти сотрудника по имени в таблице.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string", "description": "Имя или часть имени сотрудника"}
-                    },
-                    "required": ["name"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "update_employee",
-                "description": "Обновить данные сотрудника в таблице.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string", "description": "Имя сотрудника"},
-                        "field": {"type": "string", "description": "Поле: 'рекрутер', 'дата выхода', 'сумма', 'рекомендация', 'карточка'"},
-                        "value": {"type": "string", "description": "Новое значение"}
-                    },
-                    "required": ["name", "field", "value"]
                 }
             }
         },
@@ -853,38 +783,6 @@ def _execute_builtin_tool(function_name: str, function_params: dict, user_id: in
             message, events = calendar_manager.list_events(user_id, days=days)
             return message
         
-        # === Сотрудники (Google Sheets) ===
-        elif function_name == "add_employee":
-            success, message = google_sheets.add_employee(
-                employee_name=function_params.get('employee_name', ''),
-                role=function_params.get('role', ''),
-                recruiter=function_params.get('recruiter', '-//-'),
-                start_date=function_params.get('start_date'),
-                salary=function_params.get('salary', ''),
-                card_link=function_params.get('card_link', '')
-            )
-            return message
-        
-        elif function_name == "list_employees":
-            success, message = google_sheets.list_employees(
-                month=function_params.get('month')
-            )
-            return message
-        
-        elif function_name == "search_employee":
-            success, message = google_sheets.search_employee(
-                name=function_params.get('name', '')
-            )
-            return message
-        
-        elif function_name == "update_employee":
-            success, message = google_sheets.update_employee(
-                name=function_params.get('name', ''),
-                field=function_params.get('field', ''),
-                value=function_params.get('value', '')
-            )
-            return message
-        
         # === Кандидаты ===
         elif function_name == "save_candidate":
             candidate_id = hr_agent_core.memory.add_candidate({
@@ -1002,14 +900,6 @@ def _execute_builtin_tool(function_name: str, function_params: dict, user_id: in
         # === Воркфлоу ===
         elif function_name == "onboard_employee":
             results = []
-            add_result = google_sheets.add_employee(
-                employee_name=function_params.get('employee_name'),
-                role=function_params.get('position'),
-                recruiter=function_params.get('recruiter', '-//-'),
-                start_date=function_params.get('start_date'),
-                salary=function_params.get('salary', '')
-            )
-            results.append(f"📋 Таблица: {add_result[1][:100]}")
             
             welcome_result = create_welcome_document(
                 candidate_name=function_params.get('employee_name'),
